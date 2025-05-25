@@ -19,17 +19,15 @@ from pydantic import SecretStr
 
 from app_use.agent.service import Agent
 from app_use.app.flutter_app import FlutterApp
+from app_use.app.app import App
 from app_use.controller.service import Controller
 from app_use.controller.views import ActionResult
 
-
 load_dotenv()
 
-logging.basicConfig(level=logging.DEBUG)
-
+logging.basicConfig(level=logging.INFO)
 
 async def main():
-    VM_SERVICE_URI = "ws://127.0.0.1:50640/EP9CcWgxw08=/ws"
     api_key = os.getenv("GROK_API_KEY")
     
     llm = ChatOpenAI(
@@ -38,7 +36,7 @@ async def main():
         model='grok-3-beta'
     )
     
-    app = FlutterApp(vm_service_uri=VM_SERVICE_URI)
+    app = FlutterApp(vm_service_uri="ws://127.0.0.1:64668/d7XdwQDPebg=/ws")
     
     
     # Create an agent to control the app

@@ -11,6 +11,7 @@ Usage:
 """
 
 import asyncio
+import logging
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -22,6 +23,8 @@ from app_use.app.mobile_app import MobileApp
 from app_use.app.flutter_app import FlutterApp
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
 
 async def main():
     api_key = os.getenv("GROK_API_KEY")
@@ -38,14 +41,14 @@ async def main():
     app = MobileApp(
         platform_name="ios",
         device_name='iPhone 16',
-        bundle_id="com.apple.calculator",
+        bundle_id="com.apple.MobileSMS",
         appium_server_url='http://localhost:4723',
         **cap_kwargs,
     )
     
     # Create an agent to control the app
     agent = Agent(
-        task="What is the result of 1 + 1?",
+        task="Send a message to (888) 555-1212 saying `'Hey Im an agent, How are you?'",
         llm=llm,
         app=app,
     )
