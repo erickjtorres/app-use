@@ -139,7 +139,14 @@ class App(ABC):
             NotImplementedError: This method must be implemented by subclasses
         """
         raise NotImplementedError("Subclasses must implement ensure_widget_visible()")
-        
+    
+    @abstractmethod
+    def take_screenshot(self) -> str:
+        """
+        Returns a base64 encoded screenshot of the current page.
+        """
+        raise NotImplementedError("Subclasses must implement take_screenshot()")
+    
     @abstractmethod
     def close(self) -> None:
         """

@@ -813,6 +813,59 @@ class FlutterApp(App):
             
         # Always return True to allow interaction to proceed
         return True
+    
+    def take_screenshot(self) -> str:
+        """
+        Take a screenshot of the current app state.
+
+        Returns:
+            Base64 encoded string of the screenshot
+        """
+        try:
+            # Get the root widget to obtain its ID
+            root_response = self.client.get_root_widget("flutter")
+            
+            widget_id = None
+            if hasattr(root_response, 'data') and root_response.data:
+                try:
+                    import json
+                    data = json.loads(root_response.data)
+                    if 'result' in data:
+                        if isinstance(data['result'], str):
+                            widget_id = data['result']
+                        elif isinstance(data['result'], dict) and 'id' in data['result']:
+                            widget_id = data['result']['id']
+                        elif isinstance(data['result'], dict) and 'valueId' in data['result']:
+                            widget_id = data['result']['valueId']
+                except json.JSONDecodeError:
+                    pass
+            
+            # Fallback to default if we can't get the root widget ID
+            if not widget_id:
+                widget_id = 'inspector-8'
+                print(f"Could not determine root widget ID, using fallback: {widget_id}")
+            else:
+                print(f"Using root widget ID for screenshot: {widget_id}")
+            
+            # Take screenshot with reasonable dimensions and zero margin
+            screenshot_params = {
+                'id': widget_id,
+                'width': 400,  # Reasonable width
+                'height': 800,  # Reasonable height
+                'margin': 0.0,  # Zero margin as requested
+                'maxPixelRatio': None,
+                'debugPaint': False
+            }
+            
+            response = self.client.screenshot(**screenshot_params)
+            print(f"Screenshot taken with params: {screenshot_params}")
+            return response
+        except Exception as e:
+            print(f"Error taking screenshot: {e}")
+            # Fallback to original method if there's an error
+            response = self.client.screenshot(widget_id='inspector-24')
+            return response
+    
 
     def close(self):
         """Close client and stop service manager if managed by this class"""

@@ -36,7 +36,7 @@ async def main():
         model='grok-3-beta'
     )
     
-    app = FlutterApp(vm_service_uri="ws://127.0.0.1:64668/d7XdwQDPebg=/ws")
+    app = FlutterApp(vm_service_uri="ws://127.0.0.1:55151/cZmjM9XEHlY=/ws")
     
     
     # Create an agent to control the app

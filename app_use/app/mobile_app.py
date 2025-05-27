@@ -579,7 +579,18 @@ class MobileApp(App):
         except Exception as e:
             logger.error(f"Error ensuring widget visibility: {str(e)}")
             return False
-
+    def take_screenshot(self) -> str:
+        """
+        Returns a base64 encoded screenshot of the current page.
+        """
+        try:
+            screenshot = self.driver.get_screenshot_as_base64()
+            logger.info(f"Screenshot taken succesfully")
+            return screenshot
+        except Exception as e:
+            logger.error(f"Error taking screenshot: {str(e)}")
+            return ""
+    
     def _build_xpath_for_node(self, node):
         xpath_parts = []
         if self.platform_name.lower() == "android":
