@@ -11,7 +11,7 @@ from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
 from selenium.webdriver.common.actions.interaction import POINTER_TOUCH
 
-from app_use.nodes.app_node import AppElementNode, NodeState
+from app_use.nodes.app_node import AppElementNode, NodeState, CoordinateSet, ViewportInfo
 logger = logging.getLogger("AppiumApp")
 
 class AppiumElementTreeBuilder:
@@ -53,14 +53,19 @@ class AppiumElementTreeBuilder:
             page_source = self.driver.page_source
             import xml.etree.ElementTree as ET
             root = ET.fromstring(page_source)
+            
+            # Get screen dimensions for viewport calculations
             try:
                 size = self.driver.get_window_size()
                 screen_width = size['width']
                 screen_height = size['height']
+                viewport_info = ViewportInfo(width=screen_width, height=screen_height)
             except Exception:
                 screen_width = screen_height = 0
+                viewport_info = ViewportInfo(width=0, height=0)
+            
             root_node = self._parse_element(
-                root, None, platform_type, screen_width, screen_height, viewport_expansion, debug_mode
+                root, None, platform_type, screen_width, screen_height, viewport_expansion, debug_mode, viewport_info
             )
             all_nodes = self._collect_all_nodes(root_node)
             selector_map = self._selector_map.copy()
@@ -82,7 +87,7 @@ class AppiumElementTreeBuilder:
             )
             return NodeState(element_tree=empty_node, selector_map={0: empty_node})
     
-    def _parse_element(self, element, parent, platform_type, screen_width, screen_height, viewport_expansion, debug_mode):
+    def _parse_element(self, element, parent, platform_type, screen_width, screen_height, viewport_expansion, debug_mode, viewport_info):
         """
         Parse an XML element into an AppElementNode
         
@@ -94,6 +99,7 @@ class AppiumElementTreeBuilder:
             screen_height: Screen height
             viewport_expansion: Viewport expansion
             debug_mode: Debug mode
+            viewport_info: ViewportInfo object with screen dimensions
             
         Returns:
             AppElementNode: The parsed element node
@@ -120,19 +126,30 @@ class AppiumElementTreeBuilder:
         
         is_interactive = self._is_element_interactive(attributes, node_type, platform_type)
         
+        # Parse bounds and calculate coordinates
         bounds = attributes.get("bounds", None)
+        viewport_coordinates = None
+        page_coordinates = None
         is_visible = True
         is_in_viewport = True
+        
         if bounds and screen_width and screen_height:
             try:
                 # Android/iOS bounds: [x1,y1][x2,y2]
                 import re
-                m = re.match(r"\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]", bounds)
+                m = re.match(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", bounds)
                 if m:
                     x1, y1, x2, y2 = map(int, m.groups())
                     width = x2 - x1
                     height = y2 - y1
                     is_visible = width > 0 and height > 0
+                    
+                    # For mobile apps, viewport coordinates and page coordinates are the same
+                    # since there's no scrolling offset like in web browsers
+                    viewport_coordinates = CoordinateSet(x=x1, y=y1, width=width, height=height)
+                    page_coordinates = CoordinateSet(x=x1, y=y1, width=width, height=height)
+                    
+                    # Calculate if element is in expanded viewport
                     expanded_top = -viewport_expansion
                     expanded_bottom = screen_height + viewport_expansion
                     expanded_left = -viewport_expansion
@@ -141,8 +158,8 @@ class AppiumElementTreeBuilder:
                         x2 > expanded_left and x1 < expanded_right and
                         y2 > expanded_top and y1 < expanded_bottom
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error parsing bounds '{bounds}': {e}")
         
         highlight_index = None
         if is_interactive and is_visible and is_in_viewport:
@@ -153,6 +170,7 @@ class AppiumElementTreeBuilder:
         props = dict(attributes)
         props['_is_visible'] = is_visible
         props['_is_in_viewport'] = is_in_viewport
+        
         node = AppElementNode(
             unique_id=current_unique_id,
             node_type=node_type,
@@ -160,14 +178,18 @@ class AppiumElementTreeBuilder:
             properties=props,
             parent_node=parent,
             text=text,
-            key=key
+            key=key,
+            viewport_coordinates=viewport_coordinates,
+            page_coordinates=page_coordinates,
+            viewport_info=viewport_info,
+            is_in_viewport=is_in_viewport
         )
         node.highlight_index = highlight_index
         node.child_nodes = []
         
         for child_element in element:
             child_node = self._parse_element(
-                child_element, node, platform_type, screen_width, screen_height, viewport_expansion, debug_mode
+                child_element, node, platform_type, screen_width, screen_height, viewport_expansion, debug_mode, viewport_info
             )
             if child_node:
                 node.child_nodes.append(child_node)
@@ -252,124 +274,6 @@ class AppiumElementTreeBuilder:
         traverse(root_node)
         return all_nodes
 
-
-class VisionService:
-    """
-    Provides vision-based element detection and interaction capabilities
-    """
-    
-    def __init__(self, driver):
-        """
-        Initialize the vision service with an Appium driver
-        
-        Args:
-            driver: Appium WebDriver instance
-        """
-        self.driver = driver
-        
-    def capture_screen(self):
-        """
-        Capture the current screen as an image
-        
-        Returns:
-            PIL.Image: The captured screen image
-        """
-        screenshot_base64 = self.driver.get_screenshot_as_base64()
-        screenshot_data = base64.b64decode(screenshot_base64)
-        return Image.open(BytesIO(screenshot_data))
-    
-    def find_element_by_image(self, template_image_path, threshold=0.8):
-        """
-        Find an element on the screen using template matching
-        
-        Args:
-            template_image_path: Path to the template image
-            threshold: Matching threshold (0.0 to 1.0)
-            
-        Returns:
-            tuple: (x, y) coordinates of the center of the matched element, or None if not found
-        """
-        screen = self.capture_screen()
-        screen_np = np.array(screen)
-        screen_gray = cv2.cvtColor(screen_np, cv2.COLOR_RGB2GRAY)
-        
-        template = cv2.imread(template_image_path, 0)
-        
-        result = cv2.matchTemplate(screen_gray, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-        
-        if max_val >= threshold:
-            h, w = template.shape
-            center_x = max_loc[0] + w // 2
-            center_y = max_loc[1] + h // 2
-            return (center_x, center_y)
-        
-        return None
-    
-    def tap_element_by_image(self, template_image_path, threshold=0.8):
-        """
-        Tap an element on the screen using template matching
-        
-        Args:
-            template_image_path: Path to the template image
-            threshold: Matching threshold (0.0 to 1.0)
-            
-        Returns:
-            bool: True if the element was found and tapped, False otherwise
-        """
-        coordinates = self.find_element_by_image(template_image_path, threshold)
-        if coordinates:
-            x, y = coordinates
-            self.driver.tap([(x, y)], 100)
-            return True
-        return False
-    
-    def find_text_on_screen(self, text, language='eng'):
-        """
-        Find text on the screen using OCR
-        
-        Args:
-            text: Text to find
-            language: OCR language
-            
-        Returns:
-            tuple: (x, y) coordinates of the center of the text, or None if not found
-        """
-        try:
-            import pytesseract
-            
-            screen = self.capture_screen()
-            
-            ocr_result = pytesseract.image_to_data(screen, lang=language, output_type=pytesseract.Output.DICT)
-            
-            for i, word in enumerate(ocr_result['text']):
-                if text.lower() in word.lower():
-                    x = ocr_result['left'][i] + ocr_result['width'][i] // 2
-                    y = ocr_result['top'][i] + ocr_result['height'][i] // 2
-                    return (x, y)
-            
-            return None
-        except ImportError:
-            logger.error("pytesseract is not installed. Install it with 'pip install pytesseract'")
-            return None
-    
-    def tap_text_on_screen(self, text, language='eng'):
-        """
-        Tap text on the screen using OCR
-        
-        Args:
-            text: Text to tap
-            language: OCR language
-            
-        Returns:
-            bool: True if the text was found and tapped, False otherwise
-        """
-        coordinates = self.find_text_on_screen(text, language)
-        if coordinates:
-            x, y = coordinates
-            self.driver.tap([(x, y)], 100)
-            return True
-        return False
 
 
 class GestureService:

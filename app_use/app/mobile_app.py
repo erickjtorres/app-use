@@ -6,7 +6,7 @@ import time
 import base64
 from io import BytesIO
 from PIL import Image
-from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder, GestureService, VisionService
+from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder, GestureService
 import numpy as np
 import cv2
 from appium import webdriver
@@ -14,6 +14,9 @@ from appium.webdriver.common.appiumby import AppiumBy
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.actions.action_builder import ActionBuilder
+from selenium.webdriver.common.actions.pointer_input import PointerInput
 from appium.options.ios import XCUITestOptions
 from appium.options.android import UiAutomator2Options
 
@@ -50,7 +53,6 @@ class MobileApp(App):
 
         self.driver = None
         self.element_tree_builder = None
-        self.vision_service = None
         self.gesture_service = None
 
         if platform_name.lower() == "android":
@@ -105,7 +107,6 @@ class MobileApp(App):
             self.driver.implicitly_wait(self.timeout)
 
             self.element_tree_builder = AppiumElementTreeBuilder(self.driver)
-            self.vision_service = VisionService(self.driver)
             self.gesture_service = GestureService(self.driver)
 
             logger.info("Appium driver initialized successfully")
@@ -156,6 +157,7 @@ class MobileApp(App):
         self.ensure_widget_visible(node_state, unique_id)
         logger.info(f"Attempting to enter text in {target_node.node_type}")
 
+        # Priority 1: Try by key/semantics first (most reliable)
         if target_node.key:
             try:
                 logger.info(f"Trying to enter text by key: {target_node.key}")
@@ -170,6 +172,20 @@ class MobileApp(App):
             except Exception as e:
                 logger.error(f"Error entering text by key: {str(e)}")
 
+        # Priority 2: Try coordinate-based text input if viewport coordinates are available
+        if target_node.viewport_coordinates:
+            try:
+                logger.info(f"Trying coordinate-based text input for element at ({target_node.viewport_coordinates.x}, {target_node.viewport_coordinates.y})")
+                center_x, center_y = self.get_element_center_coordinates(target_node)
+                if self.input_text_at_coordinates(center_x, center_y, text):
+                    logger.info("Successfully entered text using coordinates")
+                    return True
+                else:
+                    logger.warning("Coordinate-based text input failed, continuing with other methods")
+            except Exception as e:
+                logger.error(f"Error with coordinate-based text input: {str(e)}")
+
+        # Priority 3: Try by text content
         if target_node.text:
             try:
                 logger.info(f"Trying to enter text by text: '{target_node.text}'")
@@ -184,6 +200,7 @@ class MobileApp(App):
             except Exception as e:
                 logger.error(f"Error entering text by text: {str(e)}")
 
+        # Priority 4: Try by element type
         try:
             logger.info(f"Trying to enter text by type: {target_node.node_type}")
             if self.platform_name.lower() == "android":
@@ -197,6 +214,7 @@ class MobileApp(App):
         except Exception as e:
             logger.error(f"Error entering text by type: {str(e)}")
 
+        # Priority 5: Try by XPath as final fallback
         try:
             logger.info("Trying to enter text by XPath")
             xpath = self._build_xpath_for_node(target_node)
@@ -227,6 +245,7 @@ class MobileApp(App):
         self.ensure_widget_visible(node_state, unique_id)
         logger.info(f"Attempting to click on {target_node.node_type}")
 
+        # Priority 1: Try by key/semantics first (most reliable)
         if target_node.key:
             try:
                 logger.info(f"Trying to click by key: {target_node.key}")
@@ -240,6 +259,19 @@ class MobileApp(App):
             except Exception as e:
                 logger.error(f"Error clicking by key: {str(e)}")
 
+        # Priority 2: Try coordinate-based click if viewport coordinates are available
+        if target_node.viewport_coordinates:
+            try:
+                logger.info(f"Trying coordinate-based click for element at ({target_node.viewport_coordinates.x}, {target_node.viewport_coordinates.y})")
+                if self.click_element_by_coordinates(target_node):
+                    logger.info("Successfully clicked using coordinates")
+                    return True
+                else:
+                    logger.warning("Coordinate-based click failed, continuing with other methods")
+            except Exception as e:
+                logger.error(f"Error with coordinate-based click: {str(e)}")
+
+        # Priority 3: Try by text content
         if target_node.text:
             try:
                 logger.info(f"Trying to click by text: '{target_node.text}'")
@@ -258,6 +290,7 @@ class MobileApp(App):
             except Exception as e:
                 logger.error(f"Error clicking by text: {str(e)}")
 
+        # Priority 4: Try by element type
         try:
             logger.info(f"Trying to click by type: {target_node.node_type}")
             if self.platform_name.lower() == "android":
@@ -270,6 +303,7 @@ class MobileApp(App):
         except Exception as e:
             logger.error(f"Error clicking by type: {str(e)}")
 
+        # Priority 5: Try by XPath as final fallback
         try:
             logger.info("Trying to click by XPath")
             xpath = self._build_xpath_for_node(target_node)
@@ -280,17 +314,7 @@ class MobileApp(App):
             return True
         except Exception as e:
             logger.error(f"Error clicking by XPath: {str(e)}")
-
-        if target_node.text:
-            try:
-                logger.info(f"Trying vision-based click for text: '{target_node.text}'")
-                success = self.vision_service.tap_text_on_screen(target_node.text)
-                if success:
-                    logger.info("Successfully clicked using vision-based text detection")
-                    return True
-            except Exception as e:
-                logger.error(f"Error with vision-based click: {str(e)}")
-
+        
         logger.error(f"Failed to click on element with unique_id: {unique_id}")
         return False
 
@@ -303,54 +327,81 @@ class MobileApp(App):
 
         logger.info(f"Attempting to scroll into view: {target_node.node_type}")
 
-        try:
-            if self.platform_name.lower() == "android":
-                if target_node.text:
-                    logger.info(f"Trying to scroll to text: '{target_node.text}'")
-                    self.driver.find_element(
-                        AppiumBy.ANDROID_UIAUTOMATOR,
-                        f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().text("{target_node.text}"))'
-                    )
-                    return True
-                elif target_node.key:
-                    logger.info(f"Trying to scroll to resource-id: {target_node.key}")
+        # Priority 1: Try by key/semantics first (most reliable)
+        if target_node.key:
+            try:
+                logger.info(f"Trying to scroll by key: {target_node.key}")
+                if self.platform_name.lower() == "android":
                     self.driver.find_element(
                         AppiumBy.ANDROID_UIAUTOMATOR,
                         f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId("{target_node.key}"))'
                     )
+                    logger.info("Successfully scrolled using key")
                     return True
                 else:
-                    logger.info(f"Trying to scroll to class name: {target_node.node_type}")
-                    self.driver.find_element(
-                        AppiumBy.ANDROID_UIAUTOMATOR,
-                        f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().className("{target_node.node_type}"))'
-                    )
-                    return True
-            elif self.platform_name.lower() == "ios":
-                if target_node.text:
-                    logger.info(f"Trying to scroll to text: '{target_node.text}'")
-                    self.driver.execute_script(
-                        'mobile: scroll',
-                        {'direction': 'down', 'predicateString': f'label == "{target_node.text}" OR name == "{target_node.text}" OR value == "{target_node.text}"'}
-                    )
-                    return True
-                elif target_node.key:
-                    logger.info(f"Trying to scroll to accessibility id: {target_node.key}")
                     self.driver.execute_script(
                         'mobile: scroll',
                         {'direction': 'down', 'predicateString': f'name == "{target_node.key}"'}
                     )
+                    logger.info("Successfully scrolled using key")
+                    return True
+            except Exception as e:
+                logger.error(f"Error scrolling by key: {str(e)}")
+
+        # Priority 2: Try coordinate-based scrolling if viewport coordinates are available
+        if target_node.viewport_coordinates:
+            try:
+                logger.info(f"Trying coordinate-based scroll into view for element at ({target_node.viewport_coordinates.x}, {target_node.viewport_coordinates.y})")
+                if self.scroll_element_into_view_by_coordinates(target_node):
+                    logger.info("Successfully scrolled using coordinates")
                     return True
                 else:
-                    logger.info(f"Trying to scroll to type: {target_node.node_type}")
+                    logger.warning("Coordinate-based scroll failed, continuing with other methods")
+            except Exception as e:
+                logger.error(f"Error with coordinate-based scroll: {str(e)}")
+
+        # Priority 3: Try by text content
+        if target_node.text:
+            try:
+                logger.info(f"Trying to scroll by text: '{target_node.text}'")
+                if self.platform_name.lower() == "android":
+                    self.driver.find_element(
+                        AppiumBy.ANDROID_UIAUTOMATOR,
+                        f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().text("{target_node.text}"))'
+                    )
+                    logger.info("Successfully scrolled using text content")
+                    return True
+                else:
                     self.driver.execute_script(
                         'mobile: scroll',
-                        {'direction': 'down', 'predicateString': f'type == "{target_node.node_type}"'}
+                        {'direction': 'down', 'predicateString': f'label == "{target_node.text}" OR name == "{target_node.text}" OR value == "{target_node.text}"'}
                     )
+                    logger.info("Successfully scrolled using text content")
                     return True
-        except Exception as e:
-            logger.error(f"Error scrolling to element: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error scrolling by text: {str(e)}")
 
+        # Priority 4: Try by element type
+        try:
+            logger.info(f"Trying to scroll by type: {target_node.node_type}")
+            if self.platform_name.lower() == "android":
+                self.driver.find_element(
+                    AppiumBy.ANDROID_UIAUTOMATOR,
+                    f'new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().className("{target_node.node_type}"))'
+                )
+                logger.info("Successfully scrolled using type")
+                return True
+            else:
+                self.driver.execute_script(
+                    'mobile: scroll',
+                    {'direction': 'down', 'predicateString': f'type == "{target_node.node_type}"'}
+                )
+                logger.info("Successfully scrolled using type")
+                return True
+        except Exception as e:
+            logger.error(f"Error scrolling by type: {str(e)}")
+
+        # Priority 5: Generic scroll fallback
         try:
             logger.info("Trying generic scroll down")
             size = self.driver.get_window_size()
@@ -622,3 +673,276 @@ class MobileApp(App):
                 logger.error(f"Error closing Appium driver: {str(e)}")
             finally:
                 self.driver = None
+
+    # Coordinate-based interaction methods (following browser_use pattern)
+    
+    def click_coordinates(self, x: int, y: int) -> bool:
+        """
+        Click at specific coordinates
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            
+        Returns:
+            bool: True if click was successful
+        """
+        try:
+            logger.info(f"Clicking at coordinates ({x}, {y})")
+            finger = PointerInput(PointerInput.TOUCH, "finger")
+            actions = ActionChains(self.driver)
+            actions.w3c_actions = ActionBuilder(self.driver, mouse=finger)
+            
+            actions.w3c_actions.pointer_action.move_to_location(x, y)
+            actions.w3c_actions.pointer_action.pointer_down()
+            actions.w3c_actions.pointer_action.pause(100)
+            actions.w3c_actions.pointer_action.release()
+            
+            actions.perform()
+            logger.info(f"Successfully clicked at coordinates ({x}, {y})")
+            return True
+        except Exception as e:
+            logger.error(f"Error clicking at coordinates ({x}, {y}): {str(e)}")
+            return False
+    
+    def click_element_by_coordinates(self, node: AppElementNode) -> bool:
+        """
+        Click an element using its viewport coordinates
+        
+        Args:
+            node: AppElementNode with viewport coordinates
+            
+        Returns:
+            bool: True if click was successful
+        """
+        if not node.viewport_coordinates:
+            logger.error(f"Node {node.unique_id} has no viewport coordinates")
+            return False
+        
+        # Click at the center of the element
+        center_x = int(node.viewport_coordinates.x + node.viewport_coordinates.width / 2)
+        center_y = int(node.viewport_coordinates.y + node.viewport_coordinates.height / 2)
+        
+        return self.click_coordinates(center_x, center_y)
+    
+    def scroll_to_coordinates(self, x: int, y: int, direction: str = "down", distance: int = 300) -> bool:
+        """
+        Scroll at specific coordinates
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            direction: Scroll direction ("up", "down", "left", "right")
+            distance: Scroll distance in pixels
+            
+        Returns:
+            bool: True if scroll was successful
+        """
+        try:
+            logger.info(f"Scrolling {direction} at coordinates ({x}, {y}) with distance {distance}")
+            
+            if direction == "down":
+                end_x, end_y = x, y - distance
+            elif direction == "up":
+                end_x, end_y = x, y + distance
+            elif direction == "left":
+                end_x, end_y = x + distance, y
+            elif direction == "right":
+                end_x, end_y = x - distance, y
+            else:
+                logger.error(f"Invalid scroll direction: {direction}")
+                return False
+            
+            return self.gesture_service.swipe(x, y, end_x, end_y, 300)
+        except Exception as e:
+            logger.error(f"Error scrolling at coordinates ({x}, {y}): {str(e)}")
+            return False
+    
+    def long_press_coordinates(self, x: int, y: int, duration: int = 1000) -> bool:
+        """
+        Long press at specific coordinates
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            duration: Duration of long press in milliseconds
+            
+        Returns:
+            bool: True if long press was successful
+        """
+        try:
+            logger.info(f"Long pressing at coordinates ({x}, {y}) for {duration}ms")
+            return self.gesture_service.long_press(x, y, duration)
+        except Exception as e:
+            logger.error(f"Error long pressing at coordinates ({x}, {y}): {str(e)}")
+            return False
+    
+    def input_text_at_coordinates(self, x: int, y: int, text: str) -> bool:
+        """
+        Click at coordinates and input text
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            text: Text to input
+            
+        Returns:
+            bool: True if text input was successful
+        """
+        try:
+            logger.info(f"Inputting text at coordinates ({x}, {y}): {text}")
+            
+            # First click at the coordinates to focus the input field
+            if not self.click_coordinates(x, y):
+                return False
+            
+            # Wait a moment for the field to focus
+            time.sleep(0.5)
+            
+            # Input the text
+            self.driver.execute_script('mobile: type', {'text': text})
+            logger.info("Successfully input text")
+            return True
+        except Exception as e:
+            logger.error(f"Error inputting text at coordinates ({x}, {y}): {str(e)}")
+            return False
+    
+    def swipe_coordinates(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: int = 300) -> bool:
+        """
+        Swipe from start coordinates to end coordinates
+        
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration: Swipe duration in milliseconds
+            
+        Returns:
+            bool: True if swipe was successful
+        """
+        try:
+            logger.info(f"Swiping from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+            return self.gesture_service.swipe(start_x, start_y, end_x, end_y, duration)
+        except Exception as e:
+            logger.error(f"Error swiping from ({start_x}, {start_y}) to ({end_x}, {end_y}): {str(e)}")
+            return False
+    
+    def drag_and_drop_coordinates(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: int = 1000) -> bool:
+        """
+        Drag and drop from start coordinates to end coordinates
+        
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration: Drag duration in milliseconds
+            
+        Returns:
+            bool: True if drag and drop was successful
+        """
+        try:
+            logger.info(f"Dragging from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+            return self.gesture_service.drag_and_drop(start_x, start_y, end_x, end_y, duration)
+        except Exception as e:
+            logger.error(f"Error dragging from ({start_x}, {start_y}) to ({end_x}, {end_y}): {str(e)}")
+            return False
+    
+    def is_element_in_viewport(self, node: AppElementNode, viewport_expansion: int = 0) -> bool:
+        """
+        Check if an element is in the viewport
+        
+        Args:
+            node: AppElementNode to check
+            viewport_expansion: Viewport expansion in pixels
+            
+        Returns:
+            bool: True if element is in viewport
+        """
+        if not node.viewport_coordinates or not node.viewport_info:
+            return False
+        
+        coords = node.viewport_coordinates
+        viewport = node.viewport_info
+        
+        # Calculate expanded viewport bounds
+        expanded_top = -viewport_expansion
+        expanded_bottom = viewport.height + viewport_expansion
+        expanded_left = -viewport_expansion
+        expanded_right = viewport.width + viewport_expansion
+        
+        # Check if element is within expanded viewport
+        return (
+            coords.x + coords.width > expanded_left and
+            coords.x < expanded_right and
+            coords.y + coords.height > expanded_top and
+            coords.y < expanded_bottom
+        )
+    
+    def get_element_center_coordinates(self, node: AppElementNode) -> tuple[int, int]:
+        """
+        Get the center coordinates of an element
+        
+        Args:
+            node: AppElementNode
+            
+        Returns:
+            tuple: (x, y) center coordinates, or (0, 0) if no coordinates available
+        """
+        if not node.viewport_coordinates:
+            logger.warning(f"Node {node.unique_id} has no viewport coordinates")
+            return (0, 0)
+        
+        center_x = int(node.viewport_coordinates.x + node.viewport_coordinates.width / 2)
+        center_y = int(node.viewport_coordinates.y + node.viewport_coordinates.height / 2)
+        
+        return (center_x, center_y)
+    
+    def scroll_element_into_view_by_coordinates(self, node: AppElementNode, viewport_expansion: int = 0) -> bool:
+        """
+        Scroll an element into view using coordinate-based scrolling
+        
+        Args:
+            node: AppElementNode to scroll into view
+            viewport_expansion: Viewport expansion in pixels
+            
+        Returns:
+            bool: True if element was successfully scrolled into view
+        """
+        if not node.viewport_coordinates or not node.viewport_info:
+            logger.error(f"Node {node.unique_id} has no coordinate information")
+            return False
+        
+        # Check if element is already in viewport
+        if self.is_element_in_viewport(node, viewport_expansion):
+            logger.info(f"Element {node.unique_id} is already in viewport")
+            return True
+        
+        coords = node.viewport_coordinates
+        viewport = node.viewport_info
+        
+        # Calculate scroll direction and distance
+        center_x = viewport.width // 2
+        center_y = viewport.height // 2
+        
+        # Determine scroll direction based on element position
+        if coords.y < 0:
+            # Element is above viewport, scroll up
+            scroll_distance = min(abs(coords.y) + 100, viewport.height // 2)
+            return self.scroll_to_coordinates(center_x, center_y, "up", scroll_distance)
+        elif coords.y > viewport.height:
+            # Element is below viewport, scroll down
+            scroll_distance = min(coords.y - viewport.height + 100, viewport.height // 2)
+            return self.scroll_to_coordinates(center_x, center_y, "down", scroll_distance)
+        elif coords.x < 0:
+            # Element is to the left of viewport, scroll left
+            scroll_distance = min(abs(coords.x) + 100, viewport.width // 2)
+            return self.scroll_to_coordinates(center_x, center_y, "left", scroll_distance)
+        elif coords.x > viewport.width:
+            # Element is to the right of viewport, scroll right
+            scroll_distance = min(coords.x - viewport.width + 100, viewport.width // 2)
+            return self.scroll_to_coordinates(center_x, center_y, "right", scroll_distance)
+        
+        logger.warning(f"Could not determine scroll direction for element {node.unique_id}")
+        return False

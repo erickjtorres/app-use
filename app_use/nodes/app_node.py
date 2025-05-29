@@ -2,9 +2,39 @@
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Union
 
 logger = logging.getLogger("AppNode")
+
+
+@dataclass
+class CoordinateSet:
+    """Represents a set of coordinates (x, y, width, height)"""
+    x: float
+    y: float
+    width: float
+    height: float
+
+    def __json__(self) -> dict:
+        return {
+            'x': self.x,
+            'y': self.y,
+            'width': self.width,
+            'height': self.height
+        }
+
+
+@dataclass
+class ViewportInfo:
+    """Information about the viewport"""
+    width: int
+    height: int
+
+    def __json__(self) -> dict:
+        return {
+            'width': self.width,
+            'height': self.height
+        }
 
 
 class AppBaseNode:
@@ -23,6 +53,12 @@ class AppBaseNode:
         self.child_nodes: List["AppBaseNode"] = []
         self.previous_sibling: Optional["AppBaseNode"] = None
         self.next_sibling: Optional["AppBaseNode"] = None
+
+        # Viewport and coordinate properties (optional for Flutter apps)
+        self.viewport_coordinates: Optional[CoordinateSet] = None
+        self.page_coordinates: Optional[CoordinateSet] = None
+        self.viewport_info: Optional[ViewportInfo] = None
+        self.is_in_viewport: bool = False
 
     # ------------------------------------------------------------------
     # Convenience helpers
@@ -132,11 +168,16 @@ class AppElementNode(AppBaseNode):
         self,
         unique_id: int,
         node_type: str,
-        is_interactive: bool,
-        properties: dict,
+        is_interactive: bool = False,
+        properties: Optional[Dict[str, Any]] = None,
         parent_node: Optional["AppElementNode"] = None,
         text: Optional[str] = None,
         key: Optional[str] = None,
+        highlight_index: Optional[int] = None,
+        viewport_coordinates: Optional[CoordinateSet] = None,
+        page_coordinates: Optional[CoordinateSet] = None,
+        viewport_info: Optional[ViewportInfo] = None,
+        is_in_viewport: bool = False
     ):
         super().__init__(unique_id, parent_node, key)
         # Override the base node_type with the specific one for this element
@@ -146,6 +187,17 @@ class AppElementNode(AppBaseNode):
         self.properties: dict = properties or {}
         self.text: Optional[str] = text
         self.key: Optional[str] = key
+        self.highlight_index: Optional[int] = highlight_index
+        
+        # Set coordinate and viewport properties
+        self.viewport_coordinates = viewport_coordinates
+        self.page_coordinates = page_coordinates
+        self.viewport_info = viewport_info
+        self.is_in_viewport = is_in_viewport
+        
+        # Sibling navigation
+        self.previous_sibling: Optional['AppElementNode'] = None
+        self.next_sibling: Optional['AppElementNode'] = None
 
     @property
     def is_interactive(self) -> bool:
@@ -186,6 +238,10 @@ class AppElementNode(AppBaseNode):
             # Use the direct flag for serialization and direct checks
             "interactive": self.is_interactive_flag, 
             "text": self.text,
+            "viewport_coordinates": self.viewport_coordinates.__json__() if self.viewport_coordinates else None,
+            "page_coordinates": self.page_coordinates.__json__() if self.page_coordinates else None,
+            "viewport_info": self.viewport_info.__json__() if self.viewport_info else None,
+            "is_in_viewport": self.is_in_viewport,
         }
         # Merge the dictionaries
         return {**base_json, **element_json}
