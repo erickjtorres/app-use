@@ -8,3 +8,8 @@ react-native-debugger-client==0.0.1.dev1
 langchain-core>=0.1.0
 langchain-openai>=0.0.1
 openai>=1.0.0
+
+# Other dependencies
+opencv-python>=4.11.0
+pillow>=11.2.1
+Appium-Python-Client>=5.1.1
