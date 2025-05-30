@@ -87,6 +87,7 @@ class AppMessagePrompt:
 
         interactive_widgets = []
         text_widgets = []
+        text_input_widgets = []
         
         for idx, (node_id, node) in enumerate(self.node_state.selector_map.items()):
             if getattr(node, 'node_type', '').startswith('_'):
@@ -107,25 +108,42 @@ class AppMessagePrompt:
                 widget_entry += f" '{node.text}'"
                 text_widgets.append(widget_entry)
             
+            # Check if this is a text input field
+            if self._is_text_input_widget(node):
+                widget_entry += " (text input - use enter_text action)"
+                text_input_widgets.append(widget_entry)
             # Mark if interactive
-            if hasattr(node, 'is_interactive') and node.is_interactive:
+            elif hasattr(node, 'is_interactive') and node.is_interactive:
                 widget_entry += " (interactive)"
                 interactive_widgets.append(widget_entry)
         
+        # Add text input widgets section first (highest priority)
+        if text_input_widgets:
+            text_content += "\n## Text Input Fields (use enter_text action)\n"
+            text_content += "\n".join(text_input_widgets[:10])  # Limit to avoid token explosion
+            if len(text_input_widgets) > 10:
+                text_content += f"\n... and {len(text_input_widgets) - 10} more text input fields"
+        
         # Add interactive widgets section
         if interactive_widgets:
-            text_content += "\n## Interactive Widgets\n"
+            text_content += "\n\n## Interactive Widgets\n"
             text_content += "\n".join(interactive_widgets[:25])  # Limit to avoid token explosion
             if len(interactive_widgets) > 25:
                 text_content += f"\n... and {len(interactive_widgets) - 25} more interactive widgets"
         
         # Add text widgets section if not already covered
-        remaining_text_widgets = [w for w in text_widgets if w not in interactive_widgets]
+        remaining_text_widgets = [w for w in text_widgets if w not in interactive_widgets and w not in text_input_widgets]
         if remaining_text_widgets:
             text_content += "\n\n## Text Widgets\n"
             text_content += "\n".join(remaining_text_widgets[:25])  # Limit to avoid token explosion
             if len(remaining_text_widgets) > 25:
                 text_content += f"\n... and {len(remaining_text_widgets) - 25} more text widgets"
+        
+        # Add guidance about text input
+        if text_input_widgets:
+            text_content += "\n\n## Important: Use enter_text action for text input\n"
+            text_content += "When you need to enter text, always use the 'enter_text' action with the text input field's unique ID.\n"
+            text_content += "Do NOT click on individual keyboard keys - use enter_text instead.\n"
         
         # Include previous action results if available
         if self.result:
@@ -143,6 +161,36 @@ class AppMessagePrompt:
             text_content += f"\n\nStep {current_step}/{max_steps}"
         
         return text_content
+
+    def _is_text_input_widget(self, node) -> bool:
+        """Check if a widget is a text input field"""
+        if not hasattr(node, 'node_type'):
+            return False
+            
+        node_type = node.node_type.lower()
+        
+        # Android text input types
+        android_text_inputs = [
+            "edittext", "textfield", "textinput", "searchfield"
+        ]
+        
+        # iOS text input types
+        ios_text_inputs = [
+            "textfield", "securetextfield", "searchfield"
+        ]
+        
+        # Check for text input types
+        if any(input_type in node_type for input_type in android_text_inputs + ios_text_inputs):
+            return True
+            
+        # Check for specific node types that indicate text input
+        if "XCUIElementTypeTextField" in node.node_type or "XCUIElementTypeSecureTextField" in node.node_type:
+            return True
+            
+        if "android.widget.EditText" in node.node_type:
+            return True
+            
+        return False
 
 
 class MessageManager:
@@ -285,7 +333,7 @@ class MessageManager:
         self._add_message_with_tokens(msg)
         self.add_tool_message(content='')
 
-    def add_plan(self, plan: str | None, position: int | None = None) -> None:
+    def add_plan(self, plan: str | None, position: int | None) -> None:
         """Add a planning analysis message"""
         if plan:
             msg = AIMessage(content=plan)

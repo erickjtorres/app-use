@@ -84,7 +84,7 @@ class Controller(Generic[Context]):
                     return ActionResult(is_done=True, success=False, error=f"Error in done action: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Click a widget element by its unique ID',
+            'Click a widget element by its unique ID - DO NOT use this for text input fields, use enter_text instead',
             param_model=ClickWidgetAction,
         )
         async def click_widget(params: ClickWidgetAction, app: App) -> ActionResult:
