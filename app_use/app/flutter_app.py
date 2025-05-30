@@ -62,6 +62,15 @@ class FlutterApp(App):
         """
         builder = WidgetTreeBuilder(self.client)
         node_state = builder.build_widget_tree("flutter")
+        
+        # Add screenshot to the node state
+        try:
+            screenshot = self.take_screenshot()
+            node_state.screenshot = screenshot
+        except Exception as e:
+            node_state.screenshot = None
+            print(f"Failed to capture screenshot: {e}")
+        
         return node_state
     
     def _execute_with_timeout(self, operation_name, operation_func, timeout=None):

@@ -276,6 +276,7 @@ class NodeState:
 
     element_tree: AppElementNode
     selector_map: SelectorMap = field(default_factory=dict)
+    screenshot: Optional[str] = None  # Base64 encoded screenshot
 
     # ------------------------------------------------------------------
     # Serialisation helpers
@@ -284,6 +285,7 @@ class NodeState:
         return {
             "element_tree": self.element_tree.to_json(),
             "selector_map": {uid: node.to_json() for uid, node in self.selector_map.items()},
+            "screenshot": self.screenshot,
         }
 
 

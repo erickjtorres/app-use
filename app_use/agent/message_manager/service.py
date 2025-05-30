@@ -57,7 +57,7 @@ class AppMessagePrompt:
         self.include_attributes = include_attributes
         self.step_info = step_info
     
-    def get_user_message(self, use_vision=False) -> HumanMessage:
+    def get_user_message(self, use_vision=True) -> HumanMessage:
         """Convert app state to a human message with optional screenshot"""
         content = []
         text_content = self._get_text_content()

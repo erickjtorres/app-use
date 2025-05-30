@@ -115,9 +115,19 @@ class MobileApp(App):
             raise
 
     def get_app_state(self, viewport_expansion: int = 0, debug_mode: bool = False) -> NodeState:
-        return self.element_tree_builder.build_element_tree(
+        node_state = self.element_tree_builder.build_element_tree(
             self.platform_name.lower(), viewport_expansion=viewport_expansion, debug_mode=debug_mode
         )
+        
+        # Add screenshot to the node state
+        try:
+            screenshot = self.take_screenshot()
+            node_state.screenshot = screenshot
+        except Exception as e:
+            logger.error(f"Failed to capture screenshot: {e}")
+            node_state.screenshot = None
+        
+        return node_state
 
     def get_selector_map(self, viewport_expansion: int = 0, debug_mode: bool = False):
         state = self.get_app_state(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
