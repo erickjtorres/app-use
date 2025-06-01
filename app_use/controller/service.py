@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Generic, TypeVar, Any, List, Dict, Optional, Union, Callable, Awaitable
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, create_model
 
 from app_use.controller.registry.service import Registry
 from app_use.controller.views import (
@@ -16,7 +16,11 @@ from app_use.controller.views import (
     ScrollExtendedAction,
     FindScrollableAncestorAction,
     FindScrollableDescendantAction,
-    GetAppStateAction
+    GetAppStateAction,
+    SwipeCoordinatesAction,
+    PinchGestureAction,
+    LongPressCoordinatesAction,
+    DragAndDropCoordinatesAction
 )
 from app_use.nodes.app_node import AppElementNode, NodeState, AppBaseNode
 from app_use.app.flutter_app import App
@@ -56,15 +60,18 @@ class Controller(Generic[Context]):
             output_model: Optional output model type for done action
         """
         if output_model is not None:
-            class ExtendedOutputModel(BaseModel):
-                success: bool = True
-                data: output_model
+            # Create the ExtendedOutputModel dynamically using create_model
+            ExtendedOutputModel = create_model(
+                'ExtendedOutputModel',
+                success=(bool, True),
+                data=(output_model, ...)
+            )
 
             @self.registry.action(
                 'Complete task - with return text and if the task is finished (success=True) or not yet completely finished (success=False)',
                 param_model=ExtendedOutputModel,
             )
-            async def done(params: ExtendedOutputModel) -> ActionResult:
+            async def done(params) -> ActionResult:
                 try:
                     output_dict = params.data.model_dump()
                     return ActionResult(is_done=True, success=params.success, extracted_content=str(output_dict), include_in_memory=True)
@@ -321,6 +328,87 @@ class Controller(Generic[Context]):
             except Exception as e:
                 logger.error(f"Error in get_app_state: {str(e)}")
                 return ActionResult(success=False, error=f"Exception in get_app_state: {str(e)}", include_in_memory=True)
+
+        @self.registry.action(
+            'Perform a swipe gesture from start coordinates to end coordinates',
+            param_model=SwipeCoordinatesAction,
+        )
+        async def swipe_coordinates(params: SwipeCoordinatesAction, app: App) -> ActionResult:
+            try:
+                success = app.swipe_coordinates(params.start_x, params.start_y, params.end_x, params.end_y, params.duration)
+                
+                if success:
+                    msg = f"👆 Swiped from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})"
+                    return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+                else:
+                    error_msg = f"Failed to swipe from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})"
+                    return ActionResult(success=False, error=error_msg, include_in_memory=True)
+            except NotImplementedError as e:
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error in swipe_coordinates: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in swipe_coordinates: {str(e)}", include_in_memory=True)
+
+        @self.registry.action(
+            'Perform a pinch gesture (pinch in/out) at specified coordinates',
+            param_model=PinchGestureAction,
+        )
+        async def pinch_gesture(params: PinchGestureAction, app: App) -> ActionResult:
+            try:
+                success = app.pinch_gesture(params.center_x, params.center_y, params.percent)
+                
+                if success:
+                    gesture_type = "pinch in" if params.percent < 50 else "pinch out"
+                    msg = f"🤏 Performed {gesture_type} gesture at ({params.center_x}, {params.center_y}) with {params.percent}% intensity"
+                    return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+                else:
+                    error_msg = f"Failed to perform pinch gesture at ({params.center_x}, {params.center_y})"
+                    return ActionResult(success=False, error=error_msg, include_in_memory=True)
+            except NotImplementedError as e:
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error in pinch_gesture: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in pinch_gesture: {str(e)}", include_in_memory=True)
+
+        @self.registry.action(
+            'Perform a long press gesture at specific coordinates',
+            param_model=LongPressCoordinatesAction,
+        )
+        async def long_press_coordinates(params: LongPressCoordinatesAction, app: App) -> ActionResult:
+            try:
+                success = app.long_press_coordinates(params.x, params.y, params.duration)
+                
+                if success:
+                    msg = f"👆 Performed long press at ({params.x}, {params.y}) for {params.duration}ms"
+                    return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+                else:
+                    error_msg = f"Failed to perform long press at ({params.x}, {params.y})"
+                    return ActionResult(success=False, error=error_msg, include_in_memory=True)
+            except NotImplementedError as e:
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error in long_press_coordinates: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in long_press_coordinates: {str(e)}", include_in_memory=True)
+
+        @self.registry.action(
+            'Perform a drag and drop gesture from start coordinates to end coordinates',
+            param_model=DragAndDropCoordinatesAction,
+        )
+        async def drag_and_drop_coordinates(params: DragAndDropCoordinatesAction, app: App) -> ActionResult:
+            try:
+                success = app.drag_and_drop_coordinates(params.start_x, params.start_y, params.end_x, params.end_y, params.duration)
+                
+                if success:
+                    msg = f"🖱️ Dragged from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})"
+                    return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+                else:
+                    error_msg = f"Failed to drag from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})"
+                    return ActionResult(success=False, error=error_msg, include_in_memory=True)
+            except NotImplementedError as e:
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error in drag_and_drop_coordinates: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in drag_and_drop_coordinates: {str(e)}", include_in_memory=True)
 
     def action(self, description: str, **kwargs) -> Callable:
         """

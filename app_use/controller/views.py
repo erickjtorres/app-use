@@ -120,6 +120,34 @@ class DoneAction(BaseModel):
     text: str
     success: bool = True
 
+class SwipeCoordinatesAction(BaseModel):
+    """Action model for performing a swipe gesture between coordinates"""
+    start_x: int
+    start_y: int
+    end_x: int
+    end_y: int
+    duration: int = 300
+
+class PinchGestureAction(BaseModel):
+    """Action model for performing a pinch gesture"""
+    center_x: int = None
+    center_y: int = None
+    percent: int = 50
+
+class LongPressCoordinatesAction(BaseModel):
+    """Action model for performing a long press at coordinates"""
+    x: int
+    y: int
+    duration: int = 1000
+
+class DragAndDropCoordinatesAction(BaseModel):
+    """Action model for performing a drag and drop gesture between coordinates"""
+    start_x: int
+    start_y: int
+    end_x: int
+    end_y: int
+    duration: int = 1000
+
 # Helper model for models that require no parameters
 class NoParamsAction(BaseModel):
     """

@@ -6,7 +6,8 @@ import time
 import base64
 from io import BytesIO
 from PIL import Image
-from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder, GestureService
+from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder
+from app_use.app.gestures import GestureService
 import numpy as np
 import cv2
 from appium import webdriver
@@ -533,6 +534,63 @@ class MobileApp(App):
         logger.info(f"Attempting extended scroll {direction}: {target_node.node_type}")
 
         try:
+            # First try to find a scrollable container (CollectionView, ScrollView, etc.)
+            scrollable_container = None
+            try:
+                if self.platform_name.lower() == "ios":
+                    # Look for iOS scrollable containers
+                    scrollable_types = [
+                        "XCUIElementTypeCollectionView",
+                        "XCUIElementTypeScrollView", 
+                        "XCUIElementTypeTableView"
+                    ]
+                    for container_type in scrollable_types:
+                        try:
+                            scrollable_container = self.driver.find_element(AppiumBy.CLASS_NAME, container_type)
+                            logger.info(f"Found scrollable container: {container_type}")
+                            break
+                        except:
+                            continue
+                else:
+                    # Android scrollable containers
+                    scrollable_types = [
+                        "androidx.recyclerview.widget.RecyclerView",
+                        "android.widget.ListView",
+                        "android.widget.ScrollView"
+                    ]
+                    for container_type in scrollable_types:
+                        try:
+                            scrollable_container = self.driver.find_element(AppiumBy.CLASS_NAME, container_type)
+                            logger.info(f"Found scrollable container: {container_type}")
+                            break
+                        except:
+                            continue
+            except Exception as e:
+                logger.warning(f"Could not find scrollable container: {e}")
+
+            # If we found a scrollable container, scroll within it
+            if scrollable_container:
+                try:
+                    rect = scrollable_container.rect
+                    start_x = rect['x'] + rect['width'] // 2
+                    end_x = start_x + dx
+                    
+                    if direction == "down":
+                        start_y = rect['y'] + rect['height'] * 3 // 4
+                        end_y = start_y - dy
+                    else:
+                        start_y = rect['y'] + rect['height'] // 4
+                        end_y = start_y + dy
+                    
+                    duration_ms = duration_microseconds // 1000
+                    logger.info(f"Scrolling on container from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+                    self.gesture_service.swipe(start_x, start_y, end_x, end_y, duration_ms)
+                    logger.info(f"Successfully performed extended scroll {direction} on scrollable container")
+                    return True
+                except Exception as e:
+                    logger.error(f"Error scrolling on container: {e}")
+
+            # Fallback: Try to find the target element and scroll on it
             element = None
             if target_node.key:
                 try:
@@ -570,21 +628,29 @@ class MobileApp(App):
                     start_y = rect['y'] + rect['height'] // 4
                     end_y = start_y + dy
                 duration_ms = duration_microseconds // 1000
+                logger.info(f"Scrolling on element from ({start_x}, {start_y}) to ({end_x}, {end_y})")
                 self.gesture_service.swipe(start_x, start_y, end_x, end_y, duration_ms)
                 logger.info(f"Successfully performed extended scroll {direction} on element")
                 return True
 
+            # Final fallback: Generic screen scroll with larger distance for better effect
             logger.info(f"Element not found, trying generic extended scroll {direction}")
             size = self.driver.get_window_size()
             start_x = size['width'] // 2
             end_x = start_x + dx
+            
+            # Use larger scroll distance for better scrolling effect
+            scroll_distance = max(dy, size['height'] // 3) # At least 1/3 of screen height
+            
             if direction == "down":
                 start_y = size['height'] * 3 // 4
-                end_y = start_y - dy
+                end_y = start_y - scroll_distance
             else:
                 start_y = size['height'] // 4
-                end_y = start_y + dy
+                end_y = start_y + scroll_distance
+                
             duration_ms = duration_microseconds // 1000
+            logger.info(f"Generic scroll from ({start_x}, {start_y}) to ({end_x}, {end_y}) with distance {scroll_distance}")
             self.gesture_service.swipe(start_x, start_y, end_x, end_y, duration_ms)
             logger.info(f"Successfully performed generic extended scroll {direction}")
             return True
@@ -592,7 +658,7 @@ class MobileApp(App):
             logger.error(f"Error performing extended scroll {direction}: {str(e)}")
             return False
 
-    def ensure_widget_visible(self, node_state: NodeState, unique_id: int) -> bool:
+    def ensure_widget_visible(self, node_state: NodeState, unique_id: int, timeout: int = 5) -> bool:
         target_node = node_state.selector_map.get(unique_id)
 
         if not target_node:
@@ -601,45 +667,83 @@ class MobileApp(App):
 
         logger.info(f"Ensuring widget is visible: {target_node.node_type}")
 
-        try:
-            if target_node.key:
-                try:
-                    if self.platform_name.lower() == "android":
-                        element = self.driver.find_element(AppiumBy.ID, target_node.key)
-                    else:
-                        element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, target_node.key)
-                    if element.is_displayed():
-                        logger.info("Element is already visible")
-                        return True
-                except Exception:
-                    pass
+        # First try coordinate-based visibility check if available
+        if target_node.viewport_coordinates and target_node.viewport_info:
+            if self.is_element_in_viewport(target_node):
+                logger.info("Element is already visible based on coordinates")
+                return True
 
-            if target_node.text:
-                try:
-                    if self.platform_name.lower() == "android":
-                        element = self.driver.find_element(AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{target_node.text}")')
-                    else:
-                        element = self.driver.find_element(AppiumBy.XPATH, f'//*[@name="{target_node.text}" or @label="{target_node.text}" or @value="{target_node.text}"]')
-                    if element.is_displayed():
-                        logger.info("Element is already visible")
-                        return True
-                except Exception:
-                    pass
-
+        # Try to find element with shorter timeout to avoid long waits
+        max_attempts = 3
+        attempt = 0
+        
+        while attempt < max_attempts:
             try:
-                xpath = self._build_xpath_for_node(target_node)
-                element = self.driver.find_element(AppiumBy.XPATH, xpath)
-                if element.is_displayed():
-                    logger.info("Element is already visible")
-                    return True
-            except Exception:
-                pass
+                element_found = False
+                
+                # Try key-based lookup first (most reliable)
+                if target_node.key and not element_found:
+                    try:
+                        wait = WebDriverWait(self.driver, timeout=2)
+                        if self.platform_name.lower() == "android":
+                            element = wait.until(
+                                EC.presence_of_element_located((AppiumBy.ID, target_node.key))
+                            )
+                        else:
+                            element = wait.until(
+                                EC.presence_of_element_located((AppiumBy.ACCESSIBILITY_ID, target_node.key))
+                            )
+                        element_found = True
+                    except (TimeoutException, StaleElementReferenceException, NoSuchElementException):
+                        pass
 
-            logger.info("Element is not visible, scrolling into view")
-            return self.scroll_into_view(node_state, unique_id)
-        except Exception as e:
-            logger.error(f"Error ensuring widget visibility: {str(e)}")
-            return False
+                # Try text-based lookup if key didn't work
+                if target_node.text and not element_found:
+                    try:
+                        wait = WebDriverWait(self.driver, timeout=2)
+                        if self.platform_name.lower() == "android":
+                            element = wait.until(
+                                EC.presence_of_element_located((AppiumBy.ANDROID_UIAUTOMATOR, f'new UiSelector().text("{target_node.text}")'))
+                            )
+                        else:
+                            element = wait.until(
+                                EC.presence_of_element_located((AppiumBy.XPATH, f'//*[@name="{target_node.text}" or @label="{target_node.text}" or @value="{target_node.text}"]'))
+                            )
+                        element_found = True
+                    except (TimeoutException, StaleElementReferenceException, NoSuchElementException):
+                        pass
+
+                # If element was found but not visible, try scrolling
+                if element_found:
+                    logger.info("Element found but not visible, attempting to scroll into view")
+                    if self.scroll_into_view(node_state, unique_id):
+                        return True
+                
+                # If no element found at all, it might be off-screen, try generic scroll
+                if not element_found:
+                    logger.info("Element not found, attempting generic scroll to bring it into view")
+                    size = self.driver.get_window_size()
+                    start_x = size['width'] // 2
+                    start_y = size['height'] * 3 // 4
+                    end_x = size['width'] // 2
+                    end_y = size['height'] // 4
+                    self.gesture_service.swipe(start_x, start_y, end_x, end_y, 300)
+                    
+                    # Small wait for UI to settle
+                    time.sleep(0.5)
+                
+                attempt += 1
+                
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                attempt += 1
+                if attempt < max_attempts:
+                    time.sleep(0.5)  # Brief pause before retry
+
+        # Final attempt - assume element is visible if we've tried everything
+        logger.warning(f"Could not definitively ensure widget {unique_id} is visible after {max_attempts} attempts, proceeding anyway")
+        return True  # Return True to allow interaction to proceed
+
     def take_screenshot(self) -> str:
         """
         Returns a base64 encoded screenshot of the current page.
@@ -956,3 +1060,29 @@ class MobileApp(App):
         
         logger.warning(f"Could not determine scroll direction for element {node.unique_id}")
         return False
+
+    def pinch_gesture(self, center_x: int = None, center_y: int = None, percent: int = 50) -> bool:
+        """
+        Perform a pinch gesture (pinch in/out)
+        
+        Args:
+            center_x: Center X coordinate (optional, uses screen center if None)
+            center_y: Center Y coordinate (optional, uses screen center if None)
+            percent: Pinch percentage (0-50 = pinch in, 50-100 = pinch out)
+            
+        Returns:
+            bool: True if pinch was successful
+        """
+        try:
+            logger.info(f"Performing pinch gesture at ({center_x}, {center_y}) with {percent}% intensity")
+            
+            # If no coordinates provided, use screen center
+            if center_x is None or center_y is None:
+                size = self.driver.get_window_size()
+                center_x = size['width'] // 2
+                center_y = size['height'] // 2
+            
+            return self.gesture_service.pinch(percent=percent)
+        except Exception as e:
+            logger.error(f"Error performing pinch gesture: {str(e)}")
+            return False

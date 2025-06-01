@@ -875,6 +875,65 @@ class FlutterApp(App):
             response = self.client.screenshot(widget_id='inspector-24')
             return response
     
+    def swipe_coordinates(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: int = 300) -> bool:
+        """
+        Perform a swipe gesture from start coordinates to end coordinates
+        
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration: Swipe duration in milliseconds
+            
+        Returns:
+            bool: True if swipe was successful
+        """
+        raise NotImplementedError("Swipe coordinates not implemented for Flutter apps - use Flutter-specific scroll methods")
+    
+    def pinch_gesture(self, center_x: int = None, center_y: int = None, percent: int = 50) -> bool:
+        """
+        Perform a pinch gesture (pinch in/out)
+        
+        Args:
+            center_x: Center X coordinate (optional, uses screen center if None)
+            center_y: Center Y coordinate (optional, uses screen center if None)
+            percent: Pinch percentage (0-50 = pinch in, 50-100 = pinch out)
+            
+        Returns:
+            bool: True if pinch was successful
+        """
+        raise NotImplementedError("Pinch gesture not implemented for Flutter apps")
+    
+    def long_press_coordinates(self, x: int, y: int, duration: int = 1000) -> bool:
+        """
+        Perform a long press gesture at specific coordinates
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            duration: Duration of long press in milliseconds
+            
+        Returns:
+            bool: True if long press was successful
+        """
+        raise NotImplementedError("Long press coordinates not implemented for Flutter apps")
+    
+    def drag_and_drop_coordinates(self, start_x: int, start_y: int, end_x: int, end_y: int, duration: int = 1000) -> bool:
+        """
+        Perform a drag and drop gesture from start coordinates to end coordinates
+        
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration: Drag duration in milliseconds
+            
+        Returns:
+            bool: True if drag and drop was successful
+        """
+        raise NotImplementedError("Drag and drop coordinates not implemented for Flutter apps")
 
     def close(self):
         """Close client and stop service manager if managed by this class"""
