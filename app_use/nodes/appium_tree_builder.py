@@ -1,6 +1,13 @@
 import logging
 import time
+import base64
+import os
+from io import BytesIO
+from PIL import Image
+import cv2
+import numpy as np
 
+from appium.webdriver.common.appiumby import AppiumBy
 from app_use.nodes.app_node import AppElementNode, NodeState, CoordinateSet, ViewportInfo
 logger = logging.getLogger("AppiumApp")
 
@@ -26,9 +33,15 @@ class AppiumElementTreeBuilder:
             'highlighted_count': 0,
         }
         
-    def build_element_tree(self, platform_type: str, viewport_expansion: int = 0, debug_mode: bool = False):
+    def build_element_tree(self, platform_type: str, viewport_expansion: int = 0, debug_mode: bool = False, include_highlights: bool = True):
         """
         Build an element tree from the current app state, with highlight indices and selector map
+        
+        Args:
+            platform_type: The platform type (e.g., "android", "ios")
+            viewport_expansion: Viewport expansion in pixels
+            debug_mode: Enable debug mode
+            include_highlights: Whether to include highlighted screenshot with bounding boxes (default: True)
         """
         self._id_counter = 0
         self._highlight_index = 0
@@ -43,7 +56,6 @@ class AppiumElementTreeBuilder:
             page_source = self.driver.page_source
             import xml.etree.ElementTree as ET
             root = ET.fromstring(page_source)
-            
             # Get screen dimensions for viewport calculations
             try:
                 size = self.driver.get_window_size()
@@ -57,6 +69,7 @@ class AppiumElementTreeBuilder:
             root_node = self._parse_element(
                 root, None, platform_type, screen_width, screen_height, viewport_expansion, debug_mode, viewport_info
             )
+ 
             all_nodes = self._collect_all_nodes(root_node)
             selector_map = self._selector_map.copy()
             self._perf_metrics['build_tree_time'] = time.time() - start_time
@@ -64,7 +77,17 @@ class AppiumElementTreeBuilder:
             self._perf_metrics['highlighted_count'] = len(selector_map)
             logger.info(f"Built element tree with {len(all_nodes)} nodes, {len(selector_map)} highlighted")
             
-            return NodeState(element_tree=root_node, selector_map=selector_map)
+            # Create NodeState with optional highlighted screenshot
+            node_state = NodeState(element_tree=root_node, selector_map=selector_map)
+            
+            # Add screenshot to the node state
+            try:
+                screenshot = self._take_screenshot_with_highlights(node_state, include_highlights)
+                node_state.screenshot = screenshot
+            except Exception as e:
+                logger.error(f"Failed to capture screenshot: {e}")
+            
+            return node_state
             
         except Exception as e:
             logger.error(f"Error building element tree: {str(e)}")
@@ -76,7 +99,7 @@ class AppiumElementTreeBuilder:
                 parent_node=None
             )
             return NodeState(element_tree=empty_node, selector_map={0: empty_node})
-    
+
     def _parse_element(self, element, parent, platform_type, screen_width, screen_height, viewport_expansion, debug_mode, viewport_info):
         """
         Parse an XML element into an AppElementNode
@@ -213,13 +236,22 @@ class AppiumElementTreeBuilder:
                 "android.widget.SeekBar"
             ]
             
+            # Primary check: clickable attribute
             if attributes.get("clickable", "false").lower() == "true":
                 return True
             
+            # Secondary check: has click listener
+            if attributes.get("has-click-listener", "false").lower() == "true":
+                return True
+            
+            # Check for known interactive widget types
             if any(interactive_type in node_type for interactive_type in interactive_types):
                 return True
             
-            if attributes.get("has-click-listener", "false").lower() == "true":
+            # Check for ViewGroup containers that are focusable and enabled (common for custom buttons)
+            if (node_type == "android.view.ViewGroup" and 
+                attributes.get("focusable", "false").lower() == "true" and
+                attributes.get("enabled", "false").lower() == "true"):
                 return True
                 
         elif platform_type.lower() == "ios":
@@ -235,12 +267,17 @@ class AppiumElementTreeBuilder:
                 "XCUIElementTypeKey"
             ]
             
-            if attributes.get("enabled", "false").lower() == "true":
+            # Check if element is enabled first
+            is_enabled = attributes.get("enabled", "false").lower() == "true"
+            
+            if is_enabled:
+                # Known interactive types
                 if node_type in interactive_types:
                     return True
                 
-            if "XCUIElementTypeControl" in node_type:
-                return True
+                # XCUIElementTypeOther can be interactive if it's accessible
+                if node_type == "XCUIElementTypeOther" and attributes.get("accessible", "false").lower() == "true":
+                    return True
         
         return False
     
@@ -263,3 +300,108 @@ class AppiumElementTreeBuilder:
         
         traverse(root_node)
         return all_nodes
+    
+    def _take_screenshot_with_highlights(self, node_state: NodeState, include_highlights: bool = True) -> str:
+        """
+        Take a screenshot and optionally add bounding box highlights
+        
+        Args:
+            node_state: NodeState containing the element tree and selector map
+            include_highlights: Whether to include bounding box highlights (default: True)
+            
+        Returns:
+            str: Base64 encoded screenshot
+        """
+        try:
+            # Take base screenshot
+            screenshot = self.driver.get_screenshot_as_base64()
+            
+            if not include_highlights:
+                return screenshot
+            
+            # Add bounding box highlights
+            highlighted_screenshot = self._draw_bounding_boxes_on_screenshot(screenshot, node_state)
+            return highlighted_screenshot if highlighted_screenshot else screenshot
+            
+        except Exception as e:
+            logger.error(f"Error taking screenshot: {str(e)}")
+            return ""
+
+    def _draw_bounding_boxes_on_screenshot(self, screenshot_base64: str, node_state: NodeState) -> str:
+        """
+        Draw bounding boxes over the screenshot using app nodes
+        
+        Args:
+            screenshot_base64: Base64 encoded screenshot
+            node_state: NodeState containing the element tree and selector map
+            
+        Returns:
+            str: Base64 encoded screenshot with bounding boxes, or empty string on error
+        """
+        try:
+            if not screenshot_base64:
+                logger.error("No screenshot data provided")
+                return ""
+            
+            # Decode base64 screenshot
+            screenshot_data = base64.b64decode(screenshot_base64)
+            screenshot_image = Image.open(BytesIO(screenshot_data))
+            
+            # Convert PIL Image to OpenCV format (RGB to BGR)
+            screenshot_cv = cv2.cvtColor(np.array(screenshot_image), cv2.COLOR_RGB2BGR)
+            
+            # Define color for highlighted elements (red)
+            highlight_color = (0, 0, 255)  # Red for highlighted/selector map elements
+            
+            drawn_count = 0
+            
+            # Draw bounding boxes for nodes in selector_map (highlighted interactive elements)
+            logger.debug(f"Drawing {len(node_state.selector_map)} highlighted interactive elements...")
+            for highlight_index, node in node_state.selector_map.items():
+                if node and node.viewport_coordinates:
+                    x = int(node.viewport_coordinates.x)
+                    y = int(node.viewport_coordinates.y)
+                    width = int(node.viewport_coordinates.width)
+                    height = int(node.viewport_coordinates.height)
+                    
+                    # Draw rectangle
+                    cv2.rectangle(screenshot_cv, (x, y), (x + width, y + height), highlight_color, 2)
+                    
+                    # Add highlight index label - just the number
+                    label = f"{highlight_index}"
+                    
+                    # Use appropriate font size for the highlight index
+                    font_scale = 1.0
+                    font_thickness = 2
+                    
+                    # Get text size for positioning
+                    (label_width, label_height), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+                    
+                    # Position on the right side with small offset from the right edge
+                    label_x = x + width - label_width - 5
+                    label_y = y + label_height + 5
+                    
+                    # Draw background rectangle for better visibility
+                    cv2.rectangle(screenshot_cv, (label_x - 2, label_y - label_height - 2), (label_x + label_width + 2, label_y + 2), highlight_color, -1)
+                    
+                    # Draw the number in white
+                    cv2.putText(screenshot_cv, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+                    
+                    drawn_count += 1
+            
+            logger.debug(f"Successfully drew {drawn_count} bounding boxes on screenshot")
+            
+            # Convert back to RGB for encoding
+            screenshot_rgb = cv2.cvtColor(screenshot_cv, cv2.COLOR_BGR2RGB)
+            final_image = Image.fromarray(screenshot_rgb)
+            
+            # Convert back to base64
+            buffered = BytesIO()
+            final_image.save(buffered, format="PNG")
+            highlighted_screenshot_base64 = base64.b64encode(buffered.getvalue()).decode()
+            
+            return highlighted_screenshot_base64
+            
+        except Exception as e:
+            logger.error(f"Error drawing bounding boxes on screenshot: {str(e)}")
+            return ""

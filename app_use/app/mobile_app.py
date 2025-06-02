@@ -1,11 +1,12 @@
 from typing import Optional, Union, Tuple, Dict, List, Any, TypeVar, Generic
-import os
-import atexit
-import logging
-import time
-import base64
 from io import BytesIO
 from PIL import Image
+import logging
+import atexit
+import os
+import time
+import subprocess
+import re
 from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder
 from app_use.app.gestures import GestureService
 import numpy as np
@@ -59,8 +60,18 @@ class MobileApp(App):
         if platform_name.lower() == "android":
             if not device_name:
                 raise ValueError("device_name is required for Android")
-            if not (app_package and app_activity) and not app_path:
-                raise ValueError("Either app_package and app_activity, or app_path is required for Android")
+            if not app_path:
+                if not app_package:
+                    raise ValueError("app_package is required for Android when not using app_path")
+                # Auto-detect app_activity if not provided
+                if not app_activity:
+                    logger.info(f"Auto-detecting main activity for package: {app_package}")
+                    detected_activity = self.detect_android_app_activity(app_package, device_name)
+                    if detected_activity:
+                        self.app_activity = detected_activity
+                        logger.info(f"Using detected activity: {detected_activity}")
+                    else:
+                        raise ValueError(f"Could not auto-detect app_activity for {app_package}. Please provide app_activity manually.")
         elif platform_name.lower() == "ios":
             if not device_name:
                 raise ValueError("device_name is required for iOS")
@@ -75,7 +86,10 @@ class MobileApp(App):
     def _initialize_driver(self):
         try:
             desired_caps = {
-                "platformName": self.platform_name
+                "platformName": self.platform_name,
+                "customSnapshotTimeout": 12000,
+                "snapshotMaxDepth": 100,
+
             }
 
             if self.device_name:
@@ -115,19 +129,11 @@ class MobileApp(App):
             logger.error(f"Error initializing Appium driver: {str(e)}")
             raise
 
-    def get_app_state(self, viewport_expansion: int = 0, debug_mode: bool = False) -> NodeState:
+    def get_app_state(self, viewport_expansion: int = 0, debug_mode: bool = False, include_highlights: bool = True) -> NodeState:
         node_state = self.element_tree_builder.build_element_tree(
-            self.platform_name.lower(), viewport_expansion=viewport_expansion, debug_mode=debug_mode
+            self.platform_name.lower(), viewport_expansion=viewport_expansion, debug_mode=debug_mode, include_highlights=include_highlights
         )
-        
-        # Add screenshot to the node state
-        try:
-            screenshot = self.take_screenshot()
-            node_state.screenshot = screenshot
-        except Exception as e:
-            logger.error(f"Failed to capture screenshot: {e}")
-            node_state.screenshot = None
-        
+        # Screenshot is now handled by the tree builder
         return node_state
 
     def get_selector_map(self, viewport_expansion: int = 0, debug_mode: bool = False):
@@ -1086,3 +1092,154 @@ class MobileApp(App):
         except Exception as e:
             logger.error(f"Error performing pinch gesture: {str(e)}")
             return False
+
+    @staticmethod
+    def detect_android_app_activity(package_name: str, device_name: str = None) -> str:
+        """
+        Detect the main activity of an Android app by its package name.
+        
+        Args:
+            package_name: The package name of the app (e.g., 'com.example.myapp')
+            device_name: The device ID/name (optional)
+        
+        Returns:
+            The main activity of the app, or an empty string if not found.
+        """
+        try:
+            # Build the adb command with device specification if provided
+            device_flag = f"-s {device_name}" if device_name else ""
+            
+            # Try multiple approaches to find the main activity
+            commands = [
+                # Method 1: Get launcher activity using monkey
+                f"adb {device_flag} shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1 2>&1 | grep 'Starting:' | head -1",
+                # Method 2: Use resolve-activity to get the launcher intent
+                f"adb {device_flag} shell cmd package resolve-activity --brief {package_name} | tail -n 1",
+                # Method 3: Get the default activity from dumpsys with better filtering
+                f"adb {device_flag} shell dumpsys package {package_name} | grep -A 10 'android.intent.action.MAIN' | grep -A 5 'android.intent.category.LAUNCHER'",
+                # Method 4: Query package manager for launcher activities
+                f"adb {device_flag} shell pm query-activities -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep -A 5 '{package_name}'"
+            ]
+            
+            for i, command in enumerate(commands):
+                try:
+                    logger.info(f"Trying method {i+1} to detect activity for {package_name}")
+                    result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=15)
+                    
+                    if result.returncode == 0 and result.stdout.strip():
+                        output = result.stdout.strip()
+                        logger.debug(f"Command output: {output}")
+                        
+                        # Parse the output based on the method used
+                        if i == 0:  # monkey method - most reliable for launcher activities
+                            # Look for "Starting: Intent { ... cmp=package/activity }"
+                            activity_match = re.search(r'cmp=([^/]+)/([^}]+)', output)
+                            if activity_match:
+                                package, activity = activity_match.groups()
+                                if package == package_name:
+                                    # Handle relative activity names (starting with .)
+                                    if activity.startswith('.'):
+                                        full_activity = package_name + activity
+                                    else:
+                                        full_activity = activity
+                                    logger.info(f"Detected main activity for {package_name}: {full_activity}")
+                                    return full_activity
+                        
+                        elif i == 1:  # resolve-activity method
+                            # Output should be the activity name directly
+                            activity_match = re.search(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', output)
+                            if activity_match:
+                                package, activity = activity_match.groups()
+                                if package == package_name:
+                                    if activity.startswith('.'):
+                                        full_activity = package_name + activity
+                                    else:
+                                        full_activity = activity
+                                    logger.info(f"Detected main activity for {package_name}: {full_activity}")
+                                    return full_activity
+                        
+                        elif i == 2:  # dumpsys method with better filtering
+                            lines = output.split('\n')
+                            for j, line in enumerate(lines):
+                                if 'android.intent.action.MAIN' in line:
+                                    # Look for activity info in the following lines
+                                    for k in range(j, min(j + 10, len(lines))):
+                                        activity_line = lines[k].strip()
+                                        # Look for ActivityInfo pattern and ensure it has LAUNCHER category
+                                        if 'ActivityInfo' in activity_line and 'LAUNCHER' in '\n'.join(lines[j:k+5]):
+                                            activity_match = re.search(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', activity_line)
+                                            if activity_match:
+                                                package, activity = activity_match.groups()
+                                                if package == package_name:
+                                                    if activity.startswith('.'):
+                                                        full_activity = package_name + activity
+                                                    else:
+                                                        full_activity = activity
+                                                    logger.info(f"Detected main activity for {package_name}: {full_activity}")
+                                                    return full_activity
+                        
+                        elif i == 3:  # pm query-activities method
+                            # Look for activity patterns in package manager output
+                            activity_matches = re.findall(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', output)
+                            for package, activity in activity_matches:
+                                if package == package_name:
+                                    if activity.startswith('.'):
+                                        full_activity = package_name + activity
+                                    else:
+                                        full_activity = activity
+                                    logger.info(f"Detected main activity for {package_name}: {full_activity}")
+                                    return full_activity
+                    
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Method {i+1} timed out")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Method {i+1} failed: {str(e)}")
+                    continue
+            
+            # Enhanced fallback: Try to launch the app and see what activity starts
+            try:
+                logger.info(f"Trying to launch {package_name} to detect main activity...")
+                launch_command = f"adb {device_flag} shell am start -n {package_name}/ 2>&1"
+                result = subprocess.run(launch_command, shell=True, capture_output=True, text=True, timeout=10)
+                
+                # Check what activity was actually started
+                check_command = f"adb {device_flag} shell dumpsys activity activities | grep 'mResumedActivity' | grep '{package_name}'"
+                result = subprocess.run(check_command, shell=True, capture_output=True, text=True, timeout=5)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    activity_match = re.search(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', result.stdout)
+                    if activity_match:
+                        package, activity = activity_match.groups()
+                        if package == package_name:
+                            if activity.startswith('.'):
+                                full_activity = package_name + activity
+                            else:
+                                full_activity = activity
+                            logger.info(f"Detected activity by launch test: {full_activity}")
+                            return full_activity
+            except Exception as e:
+                logger.warning(f"Launch test method failed: {str(e)}")
+            
+            # Final fallback: Try common activity naming patterns
+            common_activities = [
+                f"{package_name}.MainActivity",
+                f"{package_name}.main.MainActivity", 
+                f"{package_name}.ui.MainActivity",
+                f"{package_name}.activities.MainActivity",
+                f"{package_name}.StartActivity",
+                f"{package_name}.LaunchActivity",
+                f"{package_name}.SplashActivity",
+                f"{package_name}.HomeActivity"
+            ]
+            
+            logger.warning(f"Could not auto-detect activity for {package_name}, trying common patterns...")
+            for activity in common_activities:
+                logger.info(f"Trying fallback activity: {activity}")
+                return activity  # Return the first common pattern to try
+            
+        except Exception as e:
+            logger.error(f"Unexpected error detecting app activity: {str(e)}")
+        
+        logger.error(f"Could not detect main activity for package: {package_name}")
+        return ""
