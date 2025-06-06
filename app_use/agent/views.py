@@ -127,7 +127,7 @@ class AppStateHistory(BaseModel):
     node_count: int = Field(ge=0)
     timestamp: float = Field(default_factory=lambda: time.time())
     node_types: List[str] = []
-    interactive_widgets: int = Field(0, ge=0)
+    interactive_elements: int = Field(0, ge=0)
     screenshot: Optional[str] = None
     selector_map_size: int = Field(0, ge=0)
     
@@ -137,25 +137,25 @@ class AppStateHistory(BaseModel):
         # Count all element nodes in the tree
         node_count = len(node_state.selector_map)
         
-        # Get all unique widget types
+        # Get all unique element types
         node_types = []
         interactive_count = 0
         
         for node_id, node in node_state.selector_map.items():
-            # Add widget type if it's an ElementNode with a node_type attribute
+            # Add element type if it's an ElementNode with a node_type attribute
             if hasattr(node, 'node_type'):
                 node_type = getattr(node, 'node_type')
                 if node_type not in node_types:
                     node_types.append(node_type)
                 
-                # Count interactive widgets
+                # Count interactive elements
                 if hasattr(node, 'is_interactive') and getattr(node, 'is_interactive'):
                     interactive_count += 1
         
         return cls(
             node_count=node_count,
             node_types=node_types,
-            interactive_widgets=interactive_count,
+            interactive_elements=interactive_count,
             screenshot=screenshot,
             selector_map_size=len(node_state.selector_map)
         )

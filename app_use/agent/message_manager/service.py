@@ -83,11 +83,11 @@ class AppMessagePrompt:
         if hasattr(self.node_state, 'app_info'):
             text_content += f"App: {getattr(self.node_state, 'app_info', 'Unknown App')}\\n\\n"
 
-        text_content += f"Widget count: {len(self.node_state.selector_map)}\\n"
+        text_content += f"Element count: {len(self.node_state.selector_map)}\\n"
 
-        interactive_widgets = []
-        text_widgets = []
-        text_input_widgets = []
+        interactive_elements = []
+        text_elements = []
+        text_input_elements = []
         
         for idx, (node_id, node) in enumerate(self.node_state.selector_map.items()):
             if getattr(node, 'node_type', '').startswith('_'):
@@ -98,49 +98,49 @@ class AppMessagePrompt:
             if highlight_idx is None:
                 continue
                 
-            # Create widget entry with highlight index
-            widget_entry = f"[{highlight_idx}]"
+            # Create element entry with highlight index
+            element_entry = f"[{highlight_idx}]"
 
             if hasattr(node, 'node_type'):
-                widget_entry += f"<{node.node_type}>"
+                element_entry += f"<{node.node_type}>"
 
             if hasattr(node, 'text') and node.text:
-                widget_entry += f" '{node.text}'"
-                text_widgets.append(widget_entry)
+                element_entry += f" '{node.text}'"
+                text_elements.append(element_entry)
             
             # Check if this is a text input field
-            if self._is_text_input_widget(node):
-                widget_entry += " (text input - use enter_text action)"
-                text_input_widgets.append(widget_entry)
+            if self._is_text_input_element(node):
+                element_entry += " (text input - use enter_text action)"
+                text_input_elements.append(element_entry)
             # Mark if interactive
             elif hasattr(node, 'is_interactive') and node.is_interactive:
-                widget_entry += " (interactive)"
-                interactive_widgets.append(widget_entry)
+                element_entry += " (interactive)"
+                interactive_elements.append(element_entry)
         
-        # Add text input widgets section first (highest priority)
-        if text_input_widgets:
+        # Add text input elements section first (highest priority)
+        if text_input_elements:
             text_content += "\n## Text Input Fields (use enter_text action)\n"
-            text_content += "\n".join(text_input_widgets[:10])  # Limit to avoid token explosion
-            if len(text_input_widgets) > 10:
-                text_content += f"\n... and {len(text_input_widgets) - 10} more text input fields"
+            text_content += "\n".join(text_input_elements[:10])  # Limit to avoid token explosion
+            if len(text_input_elements) > 10:
+                text_content += f"\n... and {len(text_input_elements) - 10} more text input fields"
         
-        # Add interactive widgets section
-        if interactive_widgets:
-            text_content += "\n\n## Interactive Widgets\n"
-            text_content += "\n".join(interactive_widgets[:25])  # Limit to avoid token explosion
-            if len(interactive_widgets) > 25:
-                text_content += f"\n... and {len(interactive_widgets) - 25} more interactive widgets"
+        # Add interactive elements section
+        if interactive_elements:
+            text_content += "\n\n## Interactive Elements\n"
+            text_content += "\n".join(interactive_elements[:25])  # Limit to avoid token explosion
+            if len(interactive_elements) > 25:
+                text_content += f"\n... and {len(interactive_elements) - 25} more interactive elements"
         
-        # Add text widgets section if not already covered
-        remaining_text_widgets = [w for w in text_widgets if w not in interactive_widgets and w not in text_input_widgets]
-        if remaining_text_widgets:
-            text_content += "\n\n## Text Widgets\n"
-            text_content += "\n".join(remaining_text_widgets[:25])  # Limit to avoid token explosion
-            if len(remaining_text_widgets) > 25:
-                text_content += f"\n... and {len(remaining_text_widgets) - 25} more text widgets"
+        # Add text elements section if not already covered
+        remaining_text_elements = [w for w in text_elements if w not in interactive_elements and w not in text_input_elements]
+        if remaining_text_elements:
+            text_content += "\n\n## Text Elements\n"
+            text_content += "\n".join(remaining_text_elements[:25])  # Limit to avoid token explosion
+            if len(remaining_text_elements) > 25:
+                text_content += f"\n... and {len(remaining_text_elements) - 25} more text elements"
         
         # Add guidance about text input
-        if text_input_widgets:
+        if text_input_elements:
             text_content += "\n\n## Important: Use enter_text action for text input\n"
             text_content += "When you need to enter text, always use the 'enter_text' action with the text input field's unique ID.\n"
             text_content += "Do NOT click on individual keyboard keys - use enter_text instead.\n"
@@ -162,8 +162,8 @@ class AppMessagePrompt:
         
         return text_content
 
-    def _is_text_input_widget(self, node) -> bool:
-        """Check if a widget is a text input field"""
+    def _is_text_input_element(self, node) -> bool:
+        """Check if a element is a text input field"""
         if not hasattr(node, 'node_type'):
             return False
             
@@ -187,7 +187,7 @@ class AppMessagePrompt:
         if "XCUIElementTypeTextField" in node.node_type or "XCUIElementTypeSecureTextField" in node.node_type:
             return True
             
-        if "android.widget.EditText" in node.node_type:
+        if "android.element.EditText" in node.node_type:
             return True
             
         return False
@@ -252,7 +252,7 @@ class MessageManager:
                             Currently at step 3/15.
                             """.strip(),
                             'next_goal': """
-                            Looking at the widget structure of the current screen, I can see a SearchBar widget at 
+                            Looking at the element structure of the current screen, I can see a SearchBar element at 
                             index [8]. I'll use the 'enter_text' tool to search for the item I need to find.
                             """.strip(),
                         },

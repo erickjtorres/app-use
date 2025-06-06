@@ -9,21 +9,20 @@ from app_use.controller.views import (
     ActionModel, 
     ActionResult, 
     DoneAction,
-    ClickWidgetAction,
+    ClickElementAction,
     EnterTextAction,
     ScrollIntoViewAction,
-    ScrollUpOrDownAction,
-    ScrollExtendedAction,
-    FindScrollableAncestorAction,
-    FindScrollableDescendantAction,
+    ScrollAction,
     GetAppStateAction,
     SwipeCoordinatesAction,
     PinchGestureAction,
     LongPressCoordinatesAction,
-    DragAndDropCoordinatesAction
+    DragAndDropCoordinatesAction,
+    GetDropdownOptionsAction,
+    SelectDropdownOptionAction
 )
 from app_use.nodes.app_node import AppElementNode, NodeState, AppBaseNode
-from app_use.app.flutter_app import App
+from app_use.app.app import App
 
 logger = logging.getLogger(__name__)
 
@@ -91,30 +90,30 @@ class Controller(Generic[Context]):
                     return ActionResult(is_done=True, success=False, error=f"Error in done action: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Click a widget element by its unique ID - DO NOT use this for text input fields, use enter_text instead',
-            param_model=ClickWidgetAction,
+            'Click a element element by its unique ID - DO NOT use this for text input fields, use enter_text instead',
+            param_model=ClickElementAction,
         )
-        async def click_widget(params: ClickWidgetAction, app: App) -> ActionResult:
+        async def click_element(params: ClickElementAction, app: App) -> ActionResult:
             try:
                 if params.unique_id is None:
                     return ActionResult(success=False, error="Missing required unique_id", include_in_memory=True)
                 
                 node_state = app.get_app_state()
                 
-                success = app.click_widget_by_unique_id(node_state, params.unique_id)
+                success = app.click_element_by_unique_id(node_state, params.unique_id)
                 
                 if success:
-                    msg = f"🖱️ Clicked widget with unique ID {params.unique_id}"
+                    msg = f"🖱️ Clicked element with unique ID {params.unique_id}"
                     return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
                 else:
-                    error_msg = f"Failed to click widget with unique ID {params.unique_id}"
+                    error_msg = f"Failed to click element with unique ID {params.unique_id}"
                     return ActionResult(success=False, error=error_msg, include_in_memory=True)
             except Exception as e:
-                logger.error(f"Error in click_widget: {str(e)}")
-                return ActionResult(success=False, error=f"Exception in click_widget: {str(e)}", include_in_memory=True)
+                logger.error(f"Error in click_element: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in click_element: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Enter text into a widget element by its unique ID',
+            'Input text into an interactive element by its unique ID',
             param_model=EnterTextAction,
         )
         async def enter_text(params: EnterTextAction, app: App) -> ActionResult:
@@ -127,22 +126,22 @@ class Controller(Generic[Context]):
                 node_state = app.get_app_state()
                 
                 if params.unique_id not in node_state.selector_map:
-                    return ActionResult(success=False, error=f"Widget with unique ID {params.unique_id} not found", include_in_memory=True)
+                    return ActionResult(success=False, error=f"Element with unique ID {params.unique_id} not found", include_in_memory=True)
                 
                 success = app.enter_text_with_unique_id(node_state, params.unique_id, params.text)
                 
                 if success:
-                    msg = f"⌨️ Entered text '{params.text}' into widget with unique ID {params.unique_id}"
+                    msg = f"⌨️ Entered text '{params.text}' into element with unique ID {params.unique_id}"
                     return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
                 else:
-                    error_msg = f"Failed to enter text into widget with unique ID {params.unique_id}"
+                    error_msg = f"Failed to enter text into element with unique ID {params.unique_id}"
                     return ActionResult(success=False, error=error_msg, include_in_memory=True)
             except Exception as e:
                 logger.error(f"Error in enter_text: {str(e)}")
                 return ActionResult(success=False, error=f"Exception in enter_text: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Scroll a widget into view by its unique ID',
+            'If you dont find something which you want to interact with, scroll to it',
             param_model=ScrollIntoViewAction,
         )
         async def scroll_into_view(params: ScrollIntoViewAction, app: App) -> ActionResult:
@@ -153,158 +152,68 @@ class Controller(Generic[Context]):
                 node_state = app.get_app_state()
                 
                 if params.unique_id not in node_state.selector_map:
-                    return ActionResult(success=False, error=f"Widget with unique ID {params.unique_id} not found", include_in_memory=True)
+                    return ActionResult(success=False, error=f"Element with unique ID {params.unique_id} not found", include_in_memory=True)
                 
                 success = app.scroll_into_view(node_state, params.unique_id)
                 
                 if success:
-                    msg = f"🔍 Scrolled widget with unique ID {params.unique_id} into view"
+                    msg = f"🔍 Scrolled element with unique ID {params.unique_id} into view"
                     return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
                 else:
-                    error_msg = f"Failed to scroll widget with unique ID {params.unique_id} into view"
+                    error_msg = f"Failed to scroll element with unique ID {params.unique_id} into view"
                     return ActionResult(success=False, error=error_msg, include_in_memory=True)
             except Exception as e:
                 logger.error(f"Error in scroll_into_view: {str(e)}")
                 return ActionResult(success=False, error=f"Exception in scroll_into_view: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Scroll a widget up or down',
-            param_model=ScrollUpOrDownAction,
+            'Scroll down the page by pixel amount - if none is given, scroll one page',
+            param_model=ScrollAction,
         )
-        async def scroll_up_or_down(params: ScrollUpOrDownAction, app: App) -> ActionResult:
+        async def scroll_down(params: ScrollAction, app: App) -> ActionResult:
             try:
-                if params.unique_id is None:
-                    return ActionResult(success=False, error="Missing required unique_id", include_in_memory=True)
+                # Get screen dimensions to calculate one page scroll
+                size = app.driver.get_window_size()
+                scroll_amount = params.amount or size['height'] // 2  # Half screen height as "one page"
                 
-                if params.direction not in ["up", "down"]:
-                    return ActionResult(success=False, error=f"Invalid scroll direction: {params.direction}. Must be 'up' or 'down'.", include_in_memory=True)
-                
-                node_state = app.get_app_state()
-                
-                if params.unique_id not in node_state.selector_map:
-                    return ActionResult(success=False, error=f"Widget with unique ID {params.unique_id} not found", include_in_memory=True)
-                
-                success = app.scroll_up_or_down(node_state, params.unique_id, params.direction)
+                success = app.scroll_by_amount(scroll_amount, direction="down")
                 
                 if success:
-                    msg = f"🔍 Scrolled {params.direction} with widget unique ID {params.unique_id}"
+                    amount_str = f'{params.amount} pixels' if params.amount is not None else 'one page'
+                    msg = f"🔍 Scrolled down the page by {amount_str}"
                     return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
                 else:
-                    error_msg = f"Failed to scroll {params.direction} with widget unique ID {params.unique_id}"
+                    error_msg = "Failed to scroll down"
                     return ActionResult(success=False, error=error_msg, include_in_memory=True)
             except Exception as e:
-                logger.error(f"Error in scroll_up_or_down: {str(e)}")
-                return ActionResult(success=False, error=f"Exception in scroll_up_or_down: {str(e)}", include_in_memory=True)
+                logger.error(f"Error in scroll_down: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in scroll_down: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Perform an extended scroll with more parameters on a widget',
-            param_model=ScrollExtendedAction,
+            'Scroll up the page by pixel amount - if none is given, scroll one page',
+            param_model=ScrollAction,
         )
-        async def scroll_extended(params: ScrollExtendedAction, app: App) -> ActionResult:
+        async def scroll_up(params: ScrollAction, app: App) -> ActionResult:
             try:
-                if params.unique_id is None:
-                    return ActionResult(success=False, error="Missing required unique_id", include_in_memory=True)
+                # Get screen dimensions to calculate one page scroll
+                size = app.driver.get_window_size()
+                scroll_amount = params.amount or size['height'] // 2  # Half screen height as "one page"
                 
-                if params.direction not in ["up", "down"]:
-                    return ActionResult(success=False, error=f"Invalid scroll direction: {params.direction}. Must be 'up' or 'down'.", include_in_memory=True)
-                
-                node_state = app.get_app_state()
-                
-                if params.unique_id not in node_state.selector_map:
-                    return ActionResult(success=False, error=f"Widget with unique ID {params.unique_id} not found", include_in_memory=True)
-                
-                success = app.scroll_up_or_down_extended(
-                    node_state, 
-                    params.unique_id, 
-                    params.direction, 
-                    params.dx, 
-                    params.dy, 
-                    params.duration_microseconds,
-                    params.frequency
-                )
+                success = app.scroll_by_amount(scroll_amount, direction="up")
                 
                 if success:
-                    msg = f"🔍 Performed extended {params.direction} scroll on widget {params.unique_id} with parameters: dx={params.dx}, dy={params.dy}"
+                    amount_str = f'{params.amount} pixels' if params.amount is not None else 'one page'
+                    msg = f"🔍 Scrolled up the page by {amount_str}"
                     return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
                 else:
-                    error_msg = f"Failed to perform extended {params.direction} scroll on widget {params.unique_id}"
+                    error_msg = "Failed to scroll up"
                     return ActionResult(success=False, error=error_msg, include_in_memory=True)
             except Exception as e:
-                logger.error(f"Error in scroll_extended: {str(e)}")
-                return ActionResult(success=False, error=f"Exception in scroll_extended: {str(e)}", include_in_memory=True)
+                logger.error(f"Error in scroll_up: {str(e)}")
+                return ActionResult(success=False, error=f"Exception in scroll_up: {str(e)}", include_in_memory=True)
 
         @self.registry.action(
-            'Find the closest scrollable ancestor of a widget',
-            param_model=FindScrollableAncestorAction,
-        )
-        async def find_scrollable_ancestor(params: FindScrollableAncestorAction, app: App) -> ActionResult:
-            try:
-                if params.unique_id is None:
-                    return ActionResult(success=False, error="Missing required unique_id", include_in_memory=True)
-                
-                node_state = app.get_app_state()
-                
-                target_node = node_state.selector_map.get(params.unique_id)
-                        
-                if not target_node:
-                    return ActionResult(success=False, error=f"No widget found with unique_id: {params.unique_id}", include_in_memory=True)
-                
-                try:
-                    scrollable_ancestor = app.find_ancestor_with_scroll(target_node)
-                
-                    if scrollable_ancestor:
-                        msg = f"Found scrollable ancestor with unique ID {scrollable_ancestor.unique_id} and type {scrollable_ancestor.node_type}"
-                        return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
-                    else:
-                        msg = f"No scrollable ancestor found for widget with unique ID {params.unique_id}"
-                        return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
-                except AttributeError:
-                    return ActionResult(
-                        success=False, 
-                        error="This app implementation does not support finding scrollable ancestors", 
-                        include_in_memory=True
-                    )
-            except Exception as e:
-                logger.error(f"Error in find_scrollable_ancestor: {str(e)}")
-                return ActionResult(success=False, error=f"Exception in find_scrollable_ancestor: {str(e)}", include_in_memory=True)
-                
-        @self.registry.action(
-            'Find the first scrollable descendant of a widget',
-            param_model=FindScrollableDescendantAction,
-        )
-        async def find_scrollable_descendant(params: FindScrollableDescendantAction, app: App) -> ActionResult:
-            try:
-                if params.unique_id is None:
-                    return ActionResult(success=False, error="Missing required unique_id", include_in_memory=True)
-                
-                node_state = app.get_app_state()
-                
-                target_node = node_state.selector_map.get(params.unique_id)
-                        
-                if not target_node:
-                    return ActionResult(success=False, error=f"No widget found with unique_id: {params.unique_id}", include_in_memory=True)
-                
-                try:
-                    scrollable_descendant = app.find_descendant_with_scroll(target_node)
-                
-                    if scrollable_descendant:
-                        msg = f"Found scrollable descendant with unique ID {scrollable_descendant.unique_id} and type {scrollable_descendant.node_type}"
-                        return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
-                    else:
-                        msg = f"No scrollable descendant found for widget with unique ID {params.unique_id}"
-                        return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
-                except AttributeError:
-                    return ActionResult(
-                        success=False, 
-                        error="This app implementation does not support finding scrollable descendants", 
-                        include_in_memory=True
-                    )
-            except Exception as e:
-                logger.error(f"Error in find_scrollable_descendant: {str(e)}")
-                return ActionResult(success=False, error=f"Exception in find_scrollable_descendant: {str(e)}", include_in_memory=True)
-
-        @self.registry.action(
-            'Get the current application state with all widget nodes',
+            'Get the current application state with all nodes',
             param_model=GetAppStateAction,
         )
         async def get_app_state(params: GetAppStateAction, app: App) -> ActionResult:
@@ -409,6 +318,85 @@ class Controller(Generic[Context]):
             except Exception as e:
                 logger.error(f"Error in drag_and_drop_coordinates: {str(e)}")
                 return ActionResult(success=False, error=f"Exception in drag_and_drop_coordinates: {str(e)}", include_in_memory=True)
+
+        @self.registry.action(
+            'Get all options from a dropdown element by its unique ID',
+            param_model=GetDropdownOptionsAction,
+        )
+        async def get_dropdown_options(params: GetDropdownOptionsAction, app: App) -> ActionResult:
+            try:
+                # Retrieve current UI state
+                node_state = app.get_app_state()
+                target_node = node_state.selector_map.get(params.unique_id)
+                if not target_node:
+                    return ActionResult(success=False, error=f"No element found with unique_id {params.unique_id}", include_in_memory=True)
+
+                # Ensure element is a dropdown (Spinner on Android, XCUIElementTypePickerWheel on iOS)
+                expected_types = ["android.widget.Spinner", "XCUIElementTypePickerWheel"]
+                if target_node.node_type not in expected_types:
+                    return ActionResult(success=False, error=f"Element {params.unique_id} is not a dropdown (type={target_node.node_type})", include_in_memory=True)
+
+                # Scroll into view if needed
+                app.scroll_into_view(node_state, params.unique_id)
+
+                # Gather option texts using native commands
+                options_text: list[str] = []
+                if app.platform_name.lower() == "android":
+                    element = app.driver.find_element("xpath", app._build_xpath_for_node(target_node))
+                    option_elements = element.find_elements_by_xpath("//android.widget.CheckedTextView")
+                    options_text = [opt.text for opt in option_elements if opt.text is not None]
+                else:
+                    # iOS picker wheels expose values via attribute 'values'
+                    element = app.driver.find_element("xpath", app._build_xpath_for_node(target_node))
+                    values = element.get_attribute("values")
+                    if isinstance(values, list):
+                        options_text = values
+
+                if not options_text:
+                    msg = "No options found in dropdown"
+                    return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+
+                formatted = [f"{idx}: {text}" for idx, text in enumerate(options_text)]
+                msg = "\n".join(formatted)
+                msg += "\nUse the exact text string in select_dropdown_option"
+                return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error getting dropdown options: {str(e)}")
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
+
+        @self.registry.action(
+            'Select dropdown option for element by the text of the option',
+            param_model=SelectDropdownOptionAction,
+        )
+        async def select_dropdown_option(params: SelectDropdownOptionAction, app: App) -> ActionResult:
+            try:
+                node_state = app.get_app_state()
+                target_node = node_state.selector_map.get(params.unique_id)
+                if not target_node:
+                    return ActionResult(success=False, error=f"No element found with unique_id {params.unique_id}", include_in_memory=True)
+
+                expected_types = ["android.widget.Spinner", "XCUIElementTypePickerWheel"]
+                if target_node.node_type not in expected_types:
+                    return ActionResult(success=False, error=f"Element {params.unique_id} is not a dropdown (type={target_node.node_type})", include_in_memory=True)
+
+                app.scroll_into_view(node_state, params.unique_id)
+
+                if app.platform_name.lower() == "android":
+                    element = app.driver.find_element("xpath", app._build_xpath_for_node(target_node))
+                    element.click()
+                    # After opening spinner, find element by text and click
+                    option_xpath = f"//android.widget.CheckedTextView[@text='{params.text}']"
+                    option_el = app.driver.find_element("xpath", option_xpath)
+                    option_el.click()
+                else:
+                    element = app.driver.find_element("xpath", app._build_xpath_for_node(target_node))
+                    element.send_keys(params.text)
+
+                msg = f"Selected option '{params.text}' in dropdown {params.unique_id}"
+                return ActionResult(success=True, extracted_content=msg, include_in_memory=True)
+            except Exception as e:
+                logger.error(f"Error selecting dropdown option: {str(e)}")
+                return ActionResult(success=False, error=str(e), include_in_memory=True)
 
     def action(self, description: str, **kwargs) -> Callable:
         """

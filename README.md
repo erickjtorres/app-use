@@ -51,14 +51,9 @@ If just using flutter you will need to make sure you have the flutter driver ins
 
 Choose the app you want to interact with and via your preferred needs:
 ```python
-    # Create a Flutter app instance to interact with a flutter app via Dart VM service
-    # Allows you access to dev tools
-    app = FlutterApp(vm_service_uri=VM_SERVICE_URI)
-
-    #or
 
     # Create a mobile app instance to interact with your real device
-    app = MobileApp(
+    app = App(
         platform_name="ios",
         device_name='Your Device Name',
         bundle_id="com.apple.calculator",

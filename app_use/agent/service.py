@@ -188,8 +188,8 @@ class Agent(Generic[Context]):
         {action_description}
         
         When analyzing the app state:
-        1. First understand what widgets are available and their functions
-        2. Consider which widgets are interactive and can be tapped, swiped, or typed into
+        1. First understand what elements are available and their functions
+        2. Consider which elements are interactive and can be tapped, swiped, or typed into
         3. Choose the appropriate action based on the current state and goal
         4. Always provide clear explanations of what you're doing and why
         """

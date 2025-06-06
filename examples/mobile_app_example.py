@@ -19,8 +19,7 @@ from pydantic import SecretStr
 import time
 
 from app_use.agent.service import Agent
-from app_use.app.mobile_app import MobileApp
-from app_use.app.flutter_app import FlutterApp
+from app_use.app.app import App
 
 load_dotenv()
 
@@ -28,7 +27,10 @@ logging.basicConfig(level=logging.INFO)
 
 async def main():
     api_key = os.getenv("GROK_API_KEY")
-    cap_kwargs = {}
+    cap_kwargs = {
+
+        "udid": 'hardware-udid'  # Hardware UDID for physical device
+    }
     
     # Set up x.ai (Grok) via OpenAI compatible API
     llm = ChatOpenAI(
@@ -38,17 +40,18 @@ async def main():
     )
     
     # Create a mobile app instance
-    app = MobileApp(
+    app = App(
         platform_name="ios",
-        device_name='iPhone 16',
-        bundle_id="com.apple.MobileSMS",
+        device_name='Erickiphone',
+        bundle_id="com.atebits.Tweetie2",
         appium_server_url='http://localhost:4723',
         **cap_kwargs,
     )
+
     
     # Create an agent to control the app
     agent = Agent(
-        task="Send a message to (888) 555-1212 saying `'Hey Im an agent, How are you?'",
+        task="Like 5 posts!",
         llm=llm,
         app=app,
     )

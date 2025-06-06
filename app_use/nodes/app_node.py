@@ -38,7 +38,7 @@ class ViewportInfo:
 
 
 class AppBaseNode:
-    """Base class shared by all nodes in the widget tree."""
+    """Base class shared by all nodes in the element tree."""
 
     NODE_TYPE = "BASE_NODE"  # Default type
 
@@ -160,7 +160,7 @@ class AppTextNode(AppBaseNode):
 # ======================================================================
 
 class AppElementNode(AppBaseNode):
-    """Represents any widget element other than a raw text leaf."""
+    """Represents any element element other than a raw text leaf."""
 
     NODE_TYPE = "ELEMENT_NODE"
 
@@ -321,7 +321,7 @@ class AppNodeUtils:
 
     @staticmethod
     def find_nodes_by_type(nodes, type_str):
-        """Find nodes by widget type"""
+        """Find nodes by element type"""
         return [node for node in nodes if type_str.lower() in node.node_type.lower()]
 
     @staticmethod
@@ -403,7 +403,7 @@ class AppNodeUtils:
             if node.text:
                 text_content[f'node_{node.unique_id}'] = node.text
             
-            # Text widgets with description
+            # Text elements with description
             if 'Text' in node.node_type and 'description' in node.properties:
                 text = str(node.properties['description'])
                 text_content[f'text_{node.unique_id}'] = text

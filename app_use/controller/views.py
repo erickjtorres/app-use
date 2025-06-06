@@ -72,39 +72,25 @@ class ActionResult(BaseModel):
     extracted_content: str | None = None
     include_in_memory: bool = False
 
-class ClickWidgetAction(BaseModel):
-    """Action model for clicking a widget by its unique ID"""
+class ClickElementAction(BaseModel):
+    """Action model for clicking a element by its unique ID"""
     unique_id: int
 
 class EnterTextAction(BaseModel):
-    """Action model for entering text into a widget by its unique ID"""
+    """Action model for entering text into a element by its unique ID"""
     unique_id: int
     text: str
 
 class ScrollIntoViewAction(BaseModel):
-    """Action model for scrolling a widget into view by its unique ID"""
+    """Action model for scrolling a element into view by its unique ID"""
     unique_id: int
 
-class ScrollUpOrDownAction(BaseModel):
-    """Action model for scrolling a widget up or down"""
-    unique_id: int
-    direction: str = "down"
-
-class ScrollExtendedAction(BaseModel):
-    """Action model for performing an extended scroll with more parameters"""
-    unique_id: int
-    direction: str = "down"
-    dx: int = 0
-    dy: int = 100
-    duration_microseconds: int = 300000
-    frequency: int = 60
-
-class FindScrollableAncestorAction(BaseModel):
-    """Action model for finding the closest scrollable ancestor of a widget"""
-    unique_id: int
+class ScrollAction(BaseModel):
+    """Action model for scrolling by pixel amount"""
+    amount: int | None = None  # The number of pixels to scroll. If None, scroll one page
 
 class FindScrollableDescendantAction(BaseModel):
-    """Action model for finding the first scrollable descendant of a widget"""
+    """Action model for finding the first scrollable descendant of a element"""
     unique_id: int
 
 class GetAppStateAction(BaseModel):
@@ -147,6 +133,15 @@ class DragAndDropCoordinatesAction(BaseModel):
     end_x: int
     end_y: int
     duration: int = 1000
+
+class GetDropdownOptionsAction(BaseModel):
+    """Action model for retrieving all options from a dropdown element by its unique ID"""
+    unique_id: int
+
+class SelectDropdownOptionAction(BaseModel):
+    """Action model for selecting an option in a dropdown by its text"""
+    unique_id: int
+    text: str
 
 # Helper model for models that require no parameters
 class NoParamsAction(BaseModel):

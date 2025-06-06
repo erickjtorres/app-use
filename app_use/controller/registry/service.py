@@ -20,14 +20,28 @@ class Registry(Generic[Context]):
         self.registry = ActionRegistry()
         self.exclude_actions = exclude_actions if exclude_actions is not None else []
 
+    def _get_special_param_names(self) -> set[str]:
+        """Get the names of special parameters that should be excluded from param models"""
+        return {'app', 'client', 'all_nodes', 'context'}
+
     def _create_param_model(self, function: Callable) -> type[BaseModel]:
         """Creates a Pydantic model from function signature"""
         sig = signature(function)
+        special_param_names = self._get_special_param_names()
+        
         params = {
             name: (param.annotation, ... if param.default == param.empty else param.default)
             for name, param in sig.parameters.items()
-            if name != 'client' and name != 'all_nodes'  # Exclude common controller params
+            if name not in special_param_names
         }
+        
+        # If no user parameters remain after filtering special params, create an empty model
+        if not params:
+            return create_model(
+                f'{function.__name__}_parameters',
+                __base__=ActionModel,
+            )
+        
         return create_model(
             f'{function.__name__}_parameters',
             __base__=ActionModel,
