@@ -10,6 +10,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from pydantic import BaseModel
+from app_use.agent.prompts import AgentMessagePrompt  # moved from this module
 
 from app_use.agent.message_manager.views import MessageMetadata, MessageManagerState
 from app_use.agent.views import ActionResult, AgentOutput, AgentStepInfo
@@ -40,158 +41,6 @@ class MessageManagerSettings(BaseModel):
     message_context: str | None = None
     sensitive_data: dict[str, str] | None = None
     available_file_paths: list[str] | None = None
-
-
-class AppMessagePrompt:
-    """Class to generate user messages based on the app state"""
-
-    def __init__(
-        self,
-        node_state: NodeState,
-        result: list[ActionResult] | None = None,
-        include_attributes: list[str] = [],
-        step_info: AgentStepInfo | None = None,
-    ):
-        self.node_state = node_state
-        self.result = result
-        self.include_attributes = include_attributes
-        self.step_info = step_info
-    
-    def get_user_message(self, use_vision=True) -> HumanMessage:
-        """Convert app state to a human message with optional screenshot"""
-        content = []
-        text_content = self._get_text_content()
-
-        if use_vision and self.node_state.screenshot:
-            content = [
-                {"type": "text", "text": text_content},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{self.node_state.screenshot}"},
-                },
-            ]
-        else:
-            content = text_content
-        
-        return HumanMessage(content=content)
-    
-    def _get_text_content(self) -> str:
-        """Generate text description of the current app state"""
-        text_content = "# Current App State\n\n"
-        
-        # Include basic app info
-        if hasattr(self.node_state, 'app_info'):
-            text_content += f"App: {getattr(self.node_state, 'app_info', 'Unknown App')}\\n\\n"
-
-        text_content += f"Element count: {len(self.node_state.selector_map)}\\n"
-
-        interactive_elements = []
-        text_elements = []
-        text_input_elements = []
-        
-        for idx, (node_id, node) in enumerate(self.node_state.selector_map.items()):
-            if getattr(node, 'node_type', '').startswith('_'):
-                continue
-                
-            # Get node highlight index if available
-            highlight_idx = getattr(node, 'highlight_index', None)
-            if highlight_idx is None:
-                continue
-                
-            # Create element entry with highlight index
-            element_entry = f"[{highlight_idx}]"
-
-            if hasattr(node, 'node_type'):
-                element_entry += f"<{node.node_type}>"
-
-            if hasattr(node, 'text') and node.text:
-                element_entry += f" '{node.text}'"
-                text_elements.append(element_entry)
-            
-            # Check if this is a text input field
-            if self._is_text_input_element(node):
-                element_entry += " (text input - use enter_text action)"
-                text_input_elements.append(element_entry)
-            # Mark if interactive
-            elif hasattr(node, 'is_interactive') and node.is_interactive:
-                element_entry += " (interactive)"
-                interactive_elements.append(element_entry)
-        
-        # Add text input elements section first (highest priority)
-        if text_input_elements:
-            text_content += "\n## Text Input Fields (use enter_text action)\n"
-            text_content += "\n".join(text_input_elements[:10])  # Limit to avoid token explosion
-            if len(text_input_elements) > 10:
-                text_content += f"\n... and {len(text_input_elements) - 10} more text input fields"
-        
-        # Add interactive elements section
-        if interactive_elements:
-            text_content += "\n\n## Interactive Elements\n"
-            text_content += "\n".join(interactive_elements[:25])  # Limit to avoid token explosion
-            if len(interactive_elements) > 25:
-                text_content += f"\n... and {len(interactive_elements) - 25} more interactive elements"
-        
-        # Add text elements section if not already covered
-        remaining_text_elements = [w for w in text_elements if w not in interactive_elements and w not in text_input_elements]
-        if remaining_text_elements:
-            text_content += "\n\n## Text Elements\n"
-            text_content += "\n".join(remaining_text_elements[:25])  # Limit to avoid token explosion
-            if len(remaining_text_elements) > 25:
-                text_content += f"\n... and {len(remaining_text_elements) - 25} more text elements"
-        
-        # Add guidance about text input
-        if text_input_elements:
-            text_content += "\n\n## Important: Use enter_text action for text input\n"
-            text_content += "When you need to enter text, always use the 'enter_text' action with the text input field's unique ID.\n"
-            text_content += "Do NOT click on individual keyboard keys - use enter_text instead.\n"
-        
-        # Include previous action results if available
-        if self.result:
-            text_content += "\n\n## Previous Action Results\n"
-            for r in self.result:
-                if r.extracted_content:
-                    text_content += f"Content: {r.extracted_content}\n"
-                if r.error:
-                    text_content += f"Error: {r.error}\n"
-        
-        # Include step info if available
-        if self.step_info:
-            current_step = self.step_info.step_number + 1  # 0-indexed to 1-indexed for display
-            max_steps = self.step_info.max_steps
-            text_content += f"\n\nStep {current_step}/{max_steps}"
-        
-        return text_content
-
-    def _is_text_input_element(self, node) -> bool:
-        """Check if a element is a text input field"""
-        if not hasattr(node, 'node_type'):
-            return False
-            
-        node_type = node.node_type.lower()
-        
-        # Android text input types
-        android_text_inputs = [
-            "edittext", "textfield", "textinput", "searchfield"
-        ]
-        
-        # iOS text input types
-        ios_text_inputs = [
-            "textfield", "securetextfield", "searchfield"
-        ]
-        
-        # Check for text input types
-        if any(input_type in node_type for input_type in android_text_inputs + ios_text_inputs):
-            return True
-            
-        # Check for specific node types that indicate text input
-        if "XCUIElementTypeTextField" in node.node_type or "XCUIElementTypeSecureTextField" in node.node_type:
-            return True
-            
-        if "android.element.EditText" in node.node_type:
-            return True
-            
-        return False
-
 
 class MessageManager:
     """
@@ -305,7 +154,7 @@ class MessageManager:
                         self._add_message_with_tokens(msg)
                     result = None
 
-        state_message = AppMessagePrompt(
+        state_message = AgentMessagePrompt(
             node_state=node_state,
             result=result,
             include_attributes=self.settings.include_attributes,

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 from langchain_core.messages import (
@@ -147,3 +148,23 @@ def _write_response_to_file(f: Any, response: Any) -> None:
     """Write model response to conversation file"""
     f.write(' RESPONSE\n')
     f.write(json.dumps(json.loads(response.model_dump_json(exclude_unset=True)), indent=2))
+
+
+def time_execution_sync(func_name: str = ""):
+    """Decorator to time synchronous function execution."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            try:
+                result = func(*args, **kwargs)
+                end_time = time.time()
+                execution_time = end_time - start_time
+                logger.debug(f"⏱️ {func_name or func.__name__} took {execution_time:.2f}s")
+                return result
+            except Exception as e:
+                end_time = time.time()
+                execution_time = end_time - start_time
+                logger.debug(f"⏱️ {func_name or func.__name__} failed after {execution_time:.2f}s: {e}")
+                raise
+        return wrapper
+    return decorator

@@ -2,9 +2,17 @@
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
+from functools import cached_property
 
 logger = logging.getLogger("AppNode")
+
+
+# ----------------------------------------------------------------------
+# Forward-declared type aliases to avoid runtime imports & circular deps.
+# ----------------------------------------------------------------------
+if TYPE_CHECKING:
+    from app_use.nodes.history_tree_processor.view import HashedAppElement
 
 
 @dataclass
@@ -228,6 +236,15 @@ class AppElementNode(AppBaseNode):
             path.insert(0, name)
             current = current.parent
         return " > ".join(path)
+
+    # ------------------------------------------------------------------
+    # Cached hash for history tree comparisons
+    # ------------------------------------------------------------------
+    @cached_property
+    def hash(self) -> "HashedAppElement":
+        """Return :class:`HashedAppElement` representing *self*."""
+        from app_use.nodes.history_tree_processor.service import HistoryTreeProcessor
+        return HistoryTreeProcessor._hash_app_element(self)
 
     # ------------------------------------------------------------------
     # Serialisation helpers

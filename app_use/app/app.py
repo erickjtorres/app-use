@@ -574,8 +574,6 @@ class App():
                 logger.error(f"Error closing Appium driver: {str(e)}")
             finally:
                 self.driver = None
-
-    # Coordinate-based interaction methods (following browser_use pattern)
     
     def click_coordinates(self, x: int, y: int) -> bool:
         """

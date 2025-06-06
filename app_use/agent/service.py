@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Generic, Optional, TypeVar, Tuple, List, Dict, Union
 
@@ -20,6 +21,8 @@ from pydantic import BaseModel, ValidationError
 
 from app_use.agent.message_manager.service import MessageManager, MessageManagerSettings
 from app_use.agent.message_manager.utils import convert_input_messages, extract_json_from_model_output, save_conversation, is_model_without_tool_support
+from app_use.agent.memory.service import Memory
+from app_use.agent.memory.views import MemoryConfig
 
 from app_use.agent.views import (
     REQUIRED_LLM_API_ENV_VARS,
@@ -37,9 +40,10 @@ from app_use.agent.views import (
     ToolCallingMethod,
 )
 from app_use.nodes.app_node import NodeState
-from app_use.app.flutter_app import App
+from app_use.app.app import App
 
 from app_use.controller.service import Controller
+from app_use.agent.prompts import SystemPrompt, PlannerPrompt
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -94,11 +98,21 @@ class Agent(Generic[Context]):
         max_actions_per_step: int = 10,
         tool_calling_method: ToolCallingMethod | None = 'auto',
         page_extraction_llm: BaseChatModel | None = None,
+        planner_llm: BaseChatModel | None = None,
+        planner_interval: int = 1,
+        is_planner_reasoning: bool = False,
+        extend_planner_system_message: str | None = None,
         injected_agent_state: AgentState | None = None,
         context: Context | None = None,
+        enable_memory: bool = True,
+        memory_config: MemoryConfig | None = None,
     ):
         if page_extraction_llm is None:
             page_extraction_llm = llm
+
+        # Generate unique IDs for this agent session and task early
+        self.session_id: str = str(uuid.uuid4())
+        self.task_id: str = str(uuid.uuid4())
 
         # Core components
         self.task = task
@@ -121,7 +135,15 @@ class Agent(Generic[Context]):
             max_actions_per_step=max_actions_per_step,
             tool_calling_method=tool_calling_method,
             page_extraction_llm=page_extraction_llm,
+            planner_llm=planner_llm,
+            planner_interval=planner_interval,
+            is_planner_reasoning=is_planner_reasoning,
+            extend_planner_system_prompt=extend_planner_system_message,
         )
+
+        # Memory settings
+        self.enable_memory = enable_memory
+        self.memory_config = memory_config
 
         # Initialize state
         self.state = injected_agent_state or AgentState()
@@ -144,6 +166,51 @@ class Agent(Generic[Context]):
         
         # Initialize message manager with state
         system_message = self._get_system_message()
+        
+        self._message_manager = MessageManager(
+            task=task,
+            system_message=system_message,
+            settings=MessageManagerSettings(
+                max_input_tokens=self.settings.max_input_tokens,
+                message_context=self.settings.message_context,
+                sensitive_data=sensitive_data,
+            ),
+            state=self.state.message_manager_state,
+        )
+
+        # Initialize memory if enabled
+        if self.enable_memory:
+            try:
+                self.memory = Memory(
+                    message_manager=self._message_manager,
+                    llm=self.llm,
+                    config=self.memory_config,
+                )
+            except ImportError:
+                logger.warning(
+                    '⚠️ Agent(enable_memory=True) is set but missing some required packages, install and re-run to use memory features: pip install app-use[memory]'
+                )
+                self.memory = None
+                self.enable_memory = False
+        else:
+            self.memory = None
+
+        # Convert initial actions
+        self.initial_actions = self._convert_initial_actions(initial_actions) if initial_actions else None
+
+        # Context
+        self.context: Context | None = context
+
+        logger.info(
+            f'🧠 Starting an app-use agent with base_model={self.model_name}'
+            f'{" +tools" if self.tool_calling_method == "function_calling" else ""}'
+            f'{" +rawtools" if self.tool_calling_method == "raw" else ""}'
+            f'{" +vision" if self.settings.use_vision else ""}'
+            f'{" +memory" if self.enable_memory else ""}'
+            f' extraction_model={getattr(self.settings.page_extraction_llm, "model_name", None)}'
+            f'{f" planner_model={self.planner_model_name}" if self.planner_model_name else ""}'
+            f'{" +reasoning" if self.settings.is_planner_reasoning else ""}'
+        )
         
         self._message_manager = MessageManager(
             task=task,
@@ -174,33 +241,15 @@ class Agent(Generic[Context]):
         return self.settings.message_context
         
     def _get_system_message(self) -> SystemMessage:
-        """Generate the system message for the agent"""
-        # Here you could call a system prompt generator class or function
-        # For now, we'll just create a basic system message
-        
+        """Generate the system message for the agent using SystemPrompt"""
         action_description = self.controller.registry.get_prompt_description()
-        
-        system_content = f"""
-        You are an AI assistant that helps users interact with mobile applications.
-        Your task is to help the user achieve their goal by interacting with the app.
-        You can use the following actions to interact with the app:
-        
-        {action_description}
-        
-        When analyzing the app state:
-        1. First understand what elements are available and their functions
-        2. Consider which elements are interactive and can be tapped, swiped, or typed into
-        3. Choose the appropriate action based on the current state and goal
-        4. Always provide clear explanations of what you're doing and why
-        """
-        
-        # Add any custom overrides or extensions
-        if self.settings.override_system_message:
-            system_content = self.settings.override_system_message
-        elif self.settings.extend_system_message:
-            system_content += f"\n\n{self.settings.extend_system_message}"
-            
-        return SystemMessage(content=system_content.strip())
+        system_prompt = SystemPrompt(
+            action_description=action_description,
+            max_actions_per_step=self.settings.max_actions_per_step,
+            override_system_message=self.settings.override_system_message,
+            extend_system_message=self.settings.extend_system_message,
+        )
+        return system_prompt.get_system_message()
 
     def _set_model_names(self) -> None:
         """Set model names based on LLM attributes."""
@@ -212,6 +261,17 @@ class Agent(Generic[Context]):
         elif hasattr(self.llm, 'model'):
             model = self.llm.model  # type: ignore
             self.model_name = model if model is not None else 'Unknown'
+
+        # Set planner model name
+        if self.settings.planner_llm:
+            if hasattr(self.settings.planner_llm, 'model_name'):
+                self.planner_model_name = self.settings.planner_llm.model_name  # type: ignore
+            elif hasattr(self.settings.planner_llm, 'model'):
+                self.planner_model_name = self.settings.planner_llm.model  # type: ignore
+            else:
+                self.planner_model_name = 'Unknown'
+        else:
+            self.planner_model_name = None
 
     def _setup_action_models(self) -> None:
         """Setup dynamic action models from controller's registry"""
@@ -265,6 +325,9 @@ class Agent(Generic[Context]):
             app_state = AppStateHistory.from_node_state(node_state)
             
             await self._raise_if_stopped_or_paused()
+
+            # Run planner if conditions are met
+            await self._run_planner(step_info)
 
             # Use MessageManager to add state message with app state and previous results
             self._message_manager.add_state_message(
@@ -790,3 +853,89 @@ class Agent(Generic[Context]):
             gc.collect()
         except Exception as e:
             logger.error(f'Error during cleanup: {e}')
+
+    # ------------------------------------------------------------------
+    # Planner integration
+    # ------------------------------------------------------------------
+
+    async def _run_planner(self, step_info: AgentStepInfo | None = None) -> None:
+        """Run the planner if conditions are met"""
+        if not self.settings.planner_llm:
+            return
+
+        # Only run planner based on interval
+        if self.state.n_steps % self.settings.planner_interval != 0:
+            return
+
+        logger.info(f'📋 Running planner (step {self.state.n_steps})')
+
+        try:
+            # Get current app state for planner context
+            node_state = self.app.get_app_state()
+            
+            # Create planner messages
+            messages = []
+            
+            # Add system message for planner
+            system_prompt = PlannerPrompt(
+                available_actions=self.unfiltered_actions,
+                original_task=self.task,
+                current_step=self.state.n_steps,
+                is_reasoning=self.settings.is_planner_reasoning,
+                extend_prompt=self.settings.extend_planner_system_prompt,
+            ).get_system_message()
+            
+            messages.append(SystemMessage(content=system_prompt))
+            
+            # Add current state context
+            app_context = f"Current app state: {len(node_state.selector_map)} elements available"
+            if hasattr(node_state, 'get_text_representation'):
+                app_context += f"\n{node_state.get_text_representation()}"
+            
+            # Add recent history context
+            if len(self.state.history.history) > 0:
+                recent_actions = []
+                for i, hist in enumerate(self.state.history.history[-3:]):  # Last 3 actions
+                    if hist.model_output:
+                        for action in hist.model_output.action:
+                            action_dict = action.model_dump(exclude_none=True)
+                            action_type = list(action_dict.keys())[0] if action_dict else 'unknown'
+                            recent_actions.append(f"Step {len(self.state.history.history) - 2 + i}: {action_type}")
+                
+                if recent_actions:
+                    app_context += f"\nRecent actions: {'; '.join(recent_actions)}"
+            
+            # Add task progress message
+            progress_message = f"""
+Task: {self.task}
+
+Current Progress:
+- Step: {self.state.n_steps}
+- {app_context}
+
+Please analyze the current situation and provide strategic guidance for the next steps.
+Focus on high-level planning and identifying the most efficient path to complete the task.
+"""
+            
+            messages.append(HumanMessage(content=progress_message))
+            
+            # Query the planner LLM
+            if self.settings.is_planner_reasoning:
+                # Use reasoning mode - just get text response
+                response = await self.settings.planner_llm.ainvoke(messages)
+                planner_output = response.content if hasattr(response, 'content') else str(response)
+                logger.info(f'🧠 Planner guidance: {planner_output[:200]}...')
+                
+                # Add planner guidance to message manager
+                guidance_message = HumanMessage(
+                    content=f"Strategic guidance from planner: {planner_output}"
+                )
+                self._message_manager._add_message_with_tokens(guidance_message)
+            else:
+                # Simple planner mode - just log insights
+                response = await self.settings.planner_llm.ainvoke(messages)
+                planner_output = response.content if hasattr(response, 'content') else str(response)
+                logger.info(f'🧠 Planner insights: {planner_output[:200]}...')
+                
+        except Exception as e:
+            logger.warning(f'⚠️ Planner execution failed: {str(e)}')

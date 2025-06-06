@@ -43,6 +43,10 @@ class AgentSettings(BaseModel):
     override_system_message: Optional[str] = None
     extend_system_message: Optional[str] = None
     max_actions_per_step: int = Field(10, gt=0, description="Maximum number of actions to execute per step")
+    planner_llm: Optional[BaseChatModel] = None
+    planner_interval: int = Field(1, ge=1, description="Run planner every N steps")
+    is_planner_reasoning: bool = False
+    extend_planner_system_prompt: Optional[str] = None
     
     tool_calling_method: Optional[ToolCallingMethod] = 'auto'
     page_extraction_llm: Optional[BaseChatModel] = None
