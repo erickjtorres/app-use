@@ -4,6 +4,7 @@
 
 <h1 align="center">Enable AI to control your mobile apps 🤖</h1>
 
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/erickjtorres/app_use)
 [![Twitter Follow](https://img.shields.io/twitter/follow/Erick?style=social)](https://x.com/itsericktorres)
 [![Discord](https://img.shields.io/discord/1381129368847384597?color=7289DA&label=Discord&logo=discord&logoColor=white)](https://discord.gg/V9mW8UJ6tx)
@@ -13,35 +14,25 @@
 
 Our goal is to provide a powerful yet simple interface for AI agent app automation.
 
-> **Warning:** This project is currently under active development. APIs will change! Currently in experimental stages.
-
-
 ## Quick start
 
-Git clone the project:
+With pip (Python>=3.11):
 
 ```bash
-git clone 
+pip install app-use
 ```
 
-Install the required packages using pip:
+For memory functionality (requires Python<3.13 due to PyTorch compatibility):  
 
 ```bash
-pip install -r requirements.txt
+pip install "app-use[memory]"
 ```
 
-### Install the necessary drivers
+Install and the necessary drivers (XCUITest and UiAutomator2): [Appium](https://appium.io/docs/en/latest/)
 
-If wanting to navigate a real device you will need to install [Appium](https://appium.io/docs/en/latest/)
+Define the app and mobile device you want to target:
 
-If just using flutter you will need to make sure you have the flutter driver installed (see below)
-
-### Setting up
-
-Choose the app you want to interact with and via your preferred needs:
 ```python
-
-    # Create a mobile app instance to interact with your real device
     app = App(
         platform_name="ios",
         device_name='Your Device Name',
@@ -51,27 +42,27 @@ Choose the app you want to interact with and via your preferred needs:
     )
 ```
 
+Spin up your agent:
+
 ```python
 import asyncio
-import os
 from dotenv import load_dotenv
+load_dotenv()
+from app_use import Agent
 from langchain_openai import ChatOpenAI
-from app_use.agent.service import Agent
-from app_use.app.app import App
 
 async def main():
-    #...Define your app before...
-
     agent = Agent(
-        task="Compare the price of gpt-4o and DeepSeek-V3",
-        app=app,
+        task="What is 2+2?",
         llm=ChatOpenAI(model="gpt-4o"),
+        app=app
+
     )
     await agent.run()
 
 asyncio.run(main())
-
 ```
+
 
 Add your API keys for the provider you want to use to your .env file.
 
@@ -85,30 +76,6 @@ DEEPSEEK_API_KEY=
 GROK_API_KEY=
 NOVITA_API_KEY=
 ```
-
-
-### Setting Up a Flutter App for Control
-
-1. Make sure to enable the flutter driver extension in your mobile app
-
-```dart
-import 'package:flutter_driver/driver_extension.dart';
-
-void main() {
-  enableFlutterDriverExtension();
-  runApp(const HomeScreen());
-}
-```
-
-2. Run your Flutter app with the VM service enabled:
-
-```bash
-flutter run
-```
-
-3. Look for the VM service URI in the console output, which looks like:
-   `ws://127.0.0.1:50505/ws`
-
 
 ## Community & Support
 
