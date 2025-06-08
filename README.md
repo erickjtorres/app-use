@@ -1,17 +1,4 @@
-# App Use - AI Control for Mobile Apps
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/5be052cf-beaf-4ba7-a76a-410b32e54e18">
-    <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/ed4e98b3-5f75-428a-9bba-57192e1caee8">
-    <img 
-      alt="App Use Interface Screenshot" 
-      src="https://github.com/user-attachments/assets/ed4e98b3-5f75-428a-9bba-57192e1caee8" 
-      width="600"
-    >
-  </picture>
-</p>
-
-
+![logo](https://github.com/user-attachments/assets/d5747763-7788-4936-be90-6c22ed856d14)
 
 
 
