@@ -1,150 +1,161 @@
 import asyncio
-import logging
 import inspect
+import logging
 from inspect import iscoroutinefunction, signature
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from pydantic import BaseModel, Field, create_model
 
-from app_use.controller.views import ActionModel, ActionRegistry, RegisteredAction, ActionResult
+from app_use.controller.views import (
+	ActionModel,
+	ActionRegistry,
+	NoParamsAction,
+	RegisteredAction,
+)
 
 # Setting up logging
 logger = logging.getLogger(__name__)
 
 Context = TypeVar('Context')
 
+
 class Registry(Generic[Context]):
-    """Service for registering and managing actions"""
+	"""Service for registering and managing actions"""
 
-    def __init__(self, exclude_actions: list[str] = None):
-        self.registry = ActionRegistry()
-        self.exclude_actions = exclude_actions if exclude_actions is not None else []
+	def __init__(self, exclude_actions: list[str] = None):
+		self.registry = ActionRegistry()
+		self.exclude_actions = exclude_actions if exclude_actions is not None else []
 
-    def _get_special_param_names(self) -> set[str]:
-        """Get the names of special parameters that should be excluded from param models"""
-        return {'app', 'client', 'all_nodes', 'context'}
+	def _get_special_param_names(self) -> set[str]:
+		"""Get the names of special parameters that should be excluded from param models"""
+		return {'app', 'client', 'all_nodes', 'context'}
 
-    def _create_param_model(self, function: Callable) -> type[BaseModel]:
-        """Creates a Pydantic model from function signature"""
-        sig = signature(function)
-        special_param_names = self._get_special_param_names()
-        
-        params = {
-            name: (param.annotation, ... if param.default == param.empty else param.default)
-            for name, param in sig.parameters.items()
-            if name not in special_param_names
-        }
-        
-        # If no user parameters remain after filtering special params, create an empty model
-        if not params:
-            return create_model(
-                f'{function.__name__}_parameters',
-                __base__=ActionModel,
-            )
-        
-        return create_model(
-            f'{function.__name__}_parameters',
-            __base__=ActionModel,
-            **params,
-        )
+	def _create_param_model(self, function: Callable) -> type[BaseModel]:
+		"""Creates a Pydantic model from function signature"""
+		sig = signature(function)
+		special_param_names = self._get_special_param_names()
 
-    def action(
-        self,
-        description: str,
-        param_model: type[BaseModel] = None,
-    ):
-        """Decorator for registering actions"""
+		params = {
+			name: (
+				param.annotation,
+				... if param.default == param.empty else param.default,
+			)
+			for name, param in sig.parameters.items()
+			if name not in special_param_names
+		}
 
-        def decorator(func: Callable):
-            # Skip registration if action is in exclude_actions
-            if func.__name__ in self.exclude_actions:
-                return func
+		# If no user parameters remain after filtering special params, create an empty model
+		if not params:
+			return NoParamsAction
 
-            # Create param model from function if not provided
-            actual_param_model = param_model or self._create_param_model(func)
+		return create_model(
+			f'{function.__name__}_parameters',
+			__base__=ActionModel,
+			**params,
+		)
 
-            # Wrap sync functions to make them async
-            if not iscoroutinefunction(func):
-                async def async_wrapper(*args, **kwargs):
-                    return await asyncio.to_thread(func, *args, **kwargs)
+	def action(
+		self,
+		description: str,
+		param_model: type[BaseModel] = None,
+	):
+		"""Decorator for registering actions"""
 
-                # Copy the signature and other metadata from the original function
-                async_wrapper.__signature__ = signature(func)
-                async_wrapper.__name__ = func.__name__
-                async_wrapper.__annotations__ = func.__annotations__
-                wrapped_func = async_wrapper
-            else:
-                wrapped_func = func
+		def decorator(func: Callable):
+			# Skip registration if action is in exclude_actions
+			if func.__name__ in self.exclude_actions:
+				return func
 
-            action = RegisteredAction(
-                name=func.__name__,
-                description=description,
-                function=wrapped_func,
-                param_model=actual_param_model,
-            )
-            self.registry.actions[func.__name__] = action
-            return func
+			# Create param model from function if not provided
+			actual_param_model = param_model or self._create_param_model(func)
 
-        return decorator
+			# Wrap sync functions to make them async
+			if not iscoroutinefunction(func):
 
-    async def execute_action(
-        self,
-        action_name: str,
-        params: dict,
-        client=None,
-        app=None,
-        context: Context = None,
-    ) -> Any:
-        """Execute a registered action"""
-        if action_name not in self.registry.actions:
-            raise ValueError(f'Action {action_name} not found')
+				async def async_wrapper(*args, **kwargs):
+					return await asyncio.to_thread(func, *args, **kwargs)
 
-        action = self.registry.actions[action_name]
-        try:
-            # Create the validated Pydantic model
-            validated_params = action.param_model(**params)
+				# Copy the signature and other metadata from the original function
+				async_wrapper.__signature__ = signature(func)
+				async_wrapper.__name__ = func.__name__
+				async_wrapper.__annotations__ = func.__annotations__
+				wrapped_func = async_wrapper
+			else:
+				wrapped_func = func
 
-            # Check if the first parameter is a Pydantic model
-            sig = signature(action.function)
-            parameters = list(sig.parameters.values())
-            is_pydantic = parameters and parameters[0].annotation != inspect.Parameter.empty and issubclass(parameters[0].annotation, BaseModel)
-            parameter_names = [param.name for param in parameters]
+			action = RegisteredAction(
+				name=func.__name__,
+				description=description,
+				function=wrapped_func,
+				param_model=actual_param_model,
+			)
+			self.registry.actions[func.__name__] = action
+			return func
 
-            # Prepare arguments based on parameter type
-            extra_args = {}
-            if 'context' in parameter_names:
-                extra_args['context'] = context
-            if 'client' in parameter_names:
-                extra_args['client'] = client
-            if 'app' in parameter_names:
-                extra_args['app'] = app
+		return decorator
 
-            if is_pydantic:
-                return await action.function(validated_params, **extra_args)
-            return await action.function(**validated_params.model_dump(), **extra_args)
+	async def execute_action(
+		self,
+		action_name: str,
+		params: dict,
+		client=None,
+		app=None,
+		context: Context = None,
+	) -> Any:
+		"""Execute a registered action"""
+		if action_name not in self.registry.actions:
+			raise ValueError(f'Action {action_name} not found')
 
-        except Exception as e:
-            logger.error(f'Error executing action {action_name}: {str(e)}')
-            raise RuntimeError(f'Error executing action {action_name}: {str(e)}') from e
+		action = self.registry.actions[action_name]
+		try:
+			# Create the validated Pydantic model
+			validated_params = action.param_model(**params)
 
-    def create_action_model(self, include_actions: list[str] = None) -> type[ActionModel]:
-        """Creates a Pydantic model from registered actions"""
-        available_actions = {}
-        for name, action in self.registry.actions.items():
-            if include_actions is not None and name not in include_actions:
-                continue
-            available_actions[name] = action
+			# Check if the first parameter is a Pydantic model
+			sig = signature(action.function)
+			parameters = list(sig.parameters.values())
+			is_pydantic = (
+				parameters
+				and parameters[0].annotation != inspect.Parameter.empty
+				and issubclass(parameters[0].annotation, BaseModel)
+			)
+			parameter_names = [param.name for param in parameters]
 
-        fields = {
-            name: (
-                Optional[action.param_model],
-                Field(default=None, description=action.description),
-            )
-            for name, action in available_actions.items()
-        }
+			# Prepare arguments based on parameter type
+			extra_args = {}
+			if 'context' in parameter_names:
+				extra_args['context'] = context
+			if 'client' in parameter_names:
+				extra_args['client'] = client
+			if 'app' in parameter_names:
+				extra_args['app'] = app
 
-        return create_model('ActionModel', __base__=ActionModel, **fields)
+			if is_pydantic:
+				return await action.function(validated_params, **extra_args)
+			return await action.function(**validated_params.model_dump(), **extra_args)
 
-    def get_prompt_description(self) -> str:
-        """Get a description of all actions for the prompt"""
-        return self.registry.get_prompt_description()
+		except Exception as e:
+			logger.error(f'Error executing action {action_name}: {str(e)}')
+			raise RuntimeError(f'Error executing action {action_name}: {str(e)}') from e
+
+	def create_action_model(self, include_actions: list[str] = None) -> type[ActionModel]:
+		"""Creates a Pydantic model from registered actions"""
+		available_actions = {}
+		for name, action in self.registry.actions.items():
+			if include_actions is not None and name not in include_actions:
+				continue
+			available_actions[name] = action
+
+		fields = {
+			name: (
+				Optional[action.param_model],
+				Field(default=None, description=action.description),
+			)
+			for name, action in available_actions.items()
+		}
+
+		return create_model('ActionModel', __base__=ActionModel, **fields)
+
+	def get_prompt_description(self) -> str:
+		"""Get a description of all actions for the prompt"""
+		return self.registry.get_prompt_description()

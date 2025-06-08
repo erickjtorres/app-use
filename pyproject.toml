@@ -1,14 +1,11 @@
 [build-system]
-requires = [
-    "setuptools>=42",
-    "wheel",
-]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "app_use"
-dynamic = ["version"]
-description = "A library for controlling mobile applications via native debugging bridges"
+name = "app-use"
+version = "0.0.1"
+description = "Make mobile apps accessible for AI agents"
 readme = "README.md"
 authors = [
     {name = "Erick Torres-Moreno"},
@@ -16,49 +13,45 @@ authors = [
 license = {text = "MIT"}
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: Testing",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
 ]
-requires-python = ">=3.9"
+
+requires-python = ">=3.11,<4.0"
 dependencies = [
-    "dart-vm-client==0.0.1.dev4",
-    "pydantic>=2.0.0",
-    "python-dotenv>=0.21.0",
-    "langchain-core>=0.1.0",
+    # Core
+    "pydantic>=2.11.5",
+    "python-dotenv>=1.0.1",
+    # LangChain & LLM
+    "langchain-core==0.3.63",
+    "langchain-openai==0.3.19",
+    "langchain-anthropic==0.3.14",
+    "langchain-ollama==0.3.3",
+    "langchain-google-genai<2.1.5",
+    "langchain-deepseek>=0.1.3",
+    "langchain>=0.3.25",
+    "langchain-aws>=0.2.24",
+    "google-api-core>=2.25.0",
+    "openai>=1.0.0",
+    "mem0ai>=0.1.104",
+    # Other
+    "opencv-python>=4.11.0",
+    "pillow>=11.2.1",
+    "Appium-Python-Client>=5.1.1",
+    "faiss-cpu>=1.11.0",
+    "sentence-transformers>=4.1.0",
+    "google-generativeai>=0.8.5",
 ]
 
 [project.optional-dependencies]
-openai = [
-    "langchain-openai>=0.0.1",
-    "openai>=1.0.0",
-]
-groq = [
-    "langchain-groq>=0.0.1",
-    "groq>=0.4.0",
-]
-google = [
-    "google-generativeai>=0.3.0",
-    "langchain-google-vertexai>=0.0.1",
-]
-anthropic = [
-    "anthropic>=0.5.0",
-    "langchain-anthropic>=0.0.1",
+
+memory = [
+    # sentence-transformers: depends on pytorch, which does not support python 3.13 yet
+    "sentence-transformers>=4.0.2",
 ]
 all = [
-    "langchain-openai>=0.0.1",
-    "openai>=1.0.0",
-    "langchain-groq>=0.0.1",
-    "groq>=0.4.0",
-    "google-generativeai>=0.3.0",
-    "langchain-google-vertexai>=0.0.1",
-    "anthropic>=0.5.0",
-    "langchain-anthropic>=0.0.1",
+    "app-use[memory]",
 ]
 
 [project.urls]
@@ -66,8 +59,36 @@ Homepage = "https://github.com/app-use/app-use"
 "Bug Tracker" = "https://github.com/app-use/app-use/issues"
 Documentation = "https://github.com/app-use/app-use#readme"
 
-[tool.setuptools]
-packages = ["app_use"]
+[tool.hatch.build]
+include = [
+    "app_use/**/*.py",
+    "!app_use/**/tests/*.py",
+    "!app_use/**/tests.py",
+]
 
-[tool.setuptools.dynamic]
-version = {attr = "app_use.__version__"} 
+[tool.pyright]
+typeCheckingMode = "off" 
+
+[tool.ruff]
+line-length = 130
+fix = true
+
+[tool.ruff.lint]
+select = ["ASYNC", "E", "F", "FAST", "I", "PLE"]
+ignore = ["ASYNC109", "E101", "E402", "E501", "F841", "E731", "W291"]
+unfixable = ["E101", "E402", "E501", "F841", "E731"]
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = 140
+skip-magic-trailing-comma = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.13",
+    "build>=1.2.2",
+    "pyright>=1.1.399",
+]

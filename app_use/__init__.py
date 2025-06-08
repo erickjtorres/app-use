@@ -1,10 +1,32 @@
-"""
-App Use - A library for controlling Mobile applications.
+from app_use.agent import (
+    ActionResult,
+    Agent,
+    AgentBrain,
+    AgentError,
+    AgentHistory,
+    AgentHistoryList,
+    AgentOutput,
+    AgentSettings,
+    AgentState,
+)
+from app_use.agent.prompts import SystemPrompt
+from app_use.app.app import App
+from app_use.controller.service import Controller
+from app_use.controller.views import ActionModel
 
-This package allows you to automate interactions with Flutter apps, such as 
-clicking buttons, entering text, and scrolling, which is useful for testing, 
-automation, and building AI-powered agents that can interact with Flutter UIs.
-"""
-
-__version__ = "0.0.1.dev6"
-__author__ = "Erick Torres-Moreno"
+# Avoid name collision; ensure ActionResult refers to the agent's ActionResult by default
+__all__ = [
+    'Agent',
+    'AgentSettings',
+    'AgentState',
+    'AgentOutput',
+    'AgentHistory',
+    'AgentHistoryList',
+    'ActionResult',
+    'AgentBrain',
+    'AgentError',
+    'App',
+    'Controller',
+    'SystemPrompt',
+    'ActionModel',
+]
