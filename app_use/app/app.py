@@ -23,6 +23,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from app_use.app.gestures import GestureService
 from app_use.nodes.app_node import AppElementNode, AppState
 from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder
+from app_use.utils import time_execution_sync
 
 logger = logging.getLogger('AppiumApp')
 
@@ -131,12 +132,44 @@ class App:
 			logger.error(f'Error initializing Appium driver: {str(e)}')
 			raise
 
+	def _wait_for_page_and_frames_load(self, wait_time: float = 2.0) -> bool:
+		"""
+		Wait for the app UI to stabilize after potential page transitions.
+		
+		Simple approach: just wait a few seconds to allow transitions to complete.
+		
+		Args:
+		    wait_time: Time to wait in seconds (default: 2.0)
+		    
+		Returns:
+		    bool: Always returns True after waiting
+		"""
+		logger.debug(f'Waiting {wait_time}s for UI transitions to complete')
+		time.sleep(wait_time)
+		logger.debug('Wait completed')
+		return True
+	
+	@time_execution_sync('--get_state_summary') 
 	def get_app_state(
 		self,
 		viewport_expansion: int = 0,
 		debug_mode: bool = False,
 		include_highlights: bool = True,
 	) -> AppState:
+		"""
+		Get the current app state, optionally waiting for UI stability first.
+		
+		Args:
+		    viewport_expansion: Expand viewport bounds by this many pixels
+		    debug_mode: Enable debug mode for tree building
+		    include_highlights: Whether to include highlight indices
+		    wait_for_stability: Whether to wait for UI stability before capturing state
+		    
+		Returns:
+		    AppState: Current application state
+		"""
+		self._wait_for_page_and_frames_load()
+		
 		app_state = self.element_tree_builder.build_element_tree(
 			self.platform_name.lower(),
 			viewport_expansion=viewport_expansion,
@@ -163,20 +196,6 @@ class App:
 			return False
 		return self.click_element_by_highlight_index(highlight_index)
 
-	def input_text_by_highlight_index(
-		self,
-		highlight_index: int,
-		text: str,
-		viewport_expansion: int = 0,
-		debug_mode: bool = False,
-	) -> bool:
-		selector_map = self.get_selector_map(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
-		node = selector_map.get(highlight_index)
-		if not node:
-			logger.error(f'No element found with highlight_index: {highlight_index}')
-			return False
-		return self.enter_text_with_highlight_index(highlight_index, text)
-
 	def scroll_to_highlight_index(
 		self,
 		highlight_index: int,
@@ -201,6 +220,8 @@ class App:
 		self.ensure_element_visible_by_highlight_index(highlight_index)
 		logger.info(f'Attempting to enter text in {target_node.tag_name}')
 
+		# Note: All text input methods below include clearing existing text before entering new text
+		# Coordinate-based method uses triple-tap + delete, element-based methods use .clear()
 
 		# Priority 1: Try coordinate-based text input if viewport coordinates are available
 		if target_node.viewport_coordinates:
@@ -774,6 +795,26 @@ class App:
 			# Wait a moment for the field to focus
 			time.sleep(0.5)
 
+			# Clear any existing text by selecting all and deleting
+			try:
+				logger.debug('Attempting to clear existing text')
+				# Triple-tap to select all text (common mobile gesture)
+				self.click_coordinates(x, y)
+				time.sleep(0.1)
+				self.click_coordinates(x, y)
+				time.sleep(0.1) 
+				self.click_coordinates(x, y)
+				time.sleep(0.2)
+				
+				# Send delete key to clear selected text
+				if self.platform_name.lower() == 'android':
+					self.driver.press_keycode(67)  # KEYCODE_DEL
+				else:
+					# For iOS, use backspace
+					self.driver.execute_script('mobile: type', {'text': '\b'})
+			except Exception as e:
+				logger.debug(f'Could not clear existing text: {str(e)}')
+
 			# Input the text
 			self.driver.execute_script('mobile: type', {'text': text})
 			logger.info('Successfully input text')
@@ -1183,163 +1224,11 @@ class App:
 		"""
 		try:
 			logger.info(f'Sending keys: {keys}')
-
-			# Handle multiple keys separated by commas
-			if ',' in keys:
-				key_list = [key.strip() for key in keys.split(',')]
-				success = True
-				for key in key_list:
-					if not self._send_single_key(key):
-						success = False
-				return success
-			else:
-				return self._send_single_key(keys)
-
+			return self.gesture_service.send_keys(keys)
 		except Exception as e:
 			logger.error(f'Error sending keys "{keys}": {str(e)}')
 			return False
 
-	def _send_single_key(self, key: str) -> bool:
-		"""
-		Send a single key to the device
 
-		Args:
-		    key: The key to send
-
-		Returns:
-		    bool: True if key was sent successfully
-		"""
-		try:
-			# Platform-specific key mappings
-			if self.platform_name.lower() == 'android':
-				return self._send_android_key(key.lower())
-			elif self.platform_name.lower() == 'ios':
-				return self._send_ios_key(key.lower())
-			else:
-				logger.error(f'Unsupported platform: {self.platform_name}')
-				return False
-
-		except Exception as e:
-			logger.error(f'Error sending single key "{key}": {str(e)}')
-			return False
-
-	def _send_android_key(self, key: str) -> bool:
-		"""
-		Send a key using Android-specific methods
-
-		Args:
-		    key: The key to send
-
-		Returns:
-		    bool: True if key was sent successfully
-		"""
-		try:
-			# Android key code mappings
-			android_keycodes = {
-				'enter': 66,        # KEYCODE_ENTER
-				'back': 4,          # KEYCODE_BACK
-				'home': 3,          # KEYCODE_HOME
-				'menu': 82,         # KEYCODE_MENU
-				'delete': 67,       # KEYCODE_DEL
-				'backspace': 67,    # KEYCODE_DEL (alias)
-				'space': 62,        # KEYCODE_SPACE
-				'tab': 61,          # KEYCODE_TAB
-				'volume_up': 24,     # KEYCODE_VOLUME_UP
-				'volume_down': 25,   # KEYCODE_VOLUME_DOWN
-				'power': 26,        # KEYCODE_POWER
-				'escape': 111,      # KEYCODE_ESCAPE
-				'up': 19,           # KEYCODE_DPAD_UP
-				'down': 20,         # KEYCODE_DPAD_DOWN
-				'left': 21,         # KEYCODE_DPAD_LEFT
-				'right': 22,        # KEYCODE_DPAD_RIGHT
-				'center': 23,       # KEYCODE_DPAD_CENTER
-			}
-
-			# Check if it's a known Android keycode
-			if key in android_keycodes:
-				keycode = android_keycodes[key]
-				logger.info(f'Sending Android keycode {keycode} for key "{key}"')
-				self.driver.press_keycode(keycode)
-				return True
-
-
-			# Handle regular text input (send as characters)
-			if len(key) > 1 and key not in android_keycodes:
-				logger.info(f'Sending text input: "{key}"')
-				# Use the driver's type method for text input
-				self.driver.execute_script('mobile: type', {'text': key})
-				return True
-
-			# Handle single characters
-			if len(key) == 1:
-				logger.info(f'Sending single character: "{key}"')
-				self.driver.execute_script('mobile: type', {'text': key})
-				return True
-
-			logger.warning(f'Unknown Android key: "{key}"')
-			return False
-
-		except Exception as e:
-			logger.error(f'Error sending Android key "{key}": {str(e)}')
-			return False
-
-	def _send_ios_key(self, key: str) -> bool:
-		"""
-		Send a key using iOS-specific methods
-
-		Args:
-		    key: The key to send
-
-		Returns:
-		    bool: True if key was sent successfully
-		"""
-		try:
-			# iOS doesn't have direct keycode support like Android
-			# We use XCUITest commands for special keys
-			
-			ios_keys = {
-				'home': 'home',
-				'volumeUp': 'volumeUp',
-				'volumeDown': 'volumeDown',
-				'lock': 'lock',  # Power button
-				'siri': 'siri',
-			}
-
-			# Check if it's a known iOS key
-			if key in ios_keys:
-				ios_key = ios_keys[key]
-				logger.info(f'Sending iOS key "{ios_key}" for key "{key}"')
-				self.driver.execute_script('mobile: pressButton', {'name': ios_key})
-				return True
-
-			# Handle special keys using mobile commands
-			if key in ['Enter', 'Delete', 'Backspace']:
-				logger.info(f'Sending iOS keyboard key: "{key}"')
-				if key == 'Enter':
-					# Send return key
-					self.driver.execute_script('mobile: type', {'text': '\n'})
-				elif key in ['Delete', 'Backspace']:
-					# Send delete key
-					self.driver.execute_script('mobile: type', {'text': '\b'})
-				return True
-
-			# Handle regular text input
-			if len(key) > 1 and key not in ios_keys:
-				logger.info(f'Sending iOS text input: "{key}"')
-				self.driver.execute_script('mobile: type', {'text': key})
-				return True
-
-			# Handle single characters
-			if len(key) == 1:
-				logger.info(f'Sending iOS single character: "{key}"')
-				self.driver.execute_script('mobile: type', {'text': key})
-				return True
-
-			logger.warning(f'Unknown iOS key: "{key}"')
-			return False
-
-		except Exception as e:
-			logger.error(f'Error sending iOS key "{key}": {str(e)}')
-			return False
 
 

@@ -305,3 +305,178 @@ class GestureService:
 		except Exception as e:
 			logger.error(f'Error performing drag and drop with W3C Actions: {e}')
 			return False
+
+	def send_keys(self, keys: str) -> bool:
+		"""
+		Send keyboard keys like Enter, Back, Home, etc. for mobile navigation and text input completion
+
+		Args:
+		    keys: String representing the key(s) to send. Supports:
+		        - Single keys: "Enter", "Back", "Home", "Delete", "Space", "Tab"
+		        - Text strings: "Hello World" (sent as individual characters)
+		        - Multiple keys: "Enter,Back,Home" (comma-separated)
+
+		Returns:
+		    bool: True if keys were sent successfully
+
+		Supported mobile keys:
+		    Android: Enter, Back, Home, Menu, Search, Delete, Space, Tab, 
+		             VolumeUp, VolumeDown, Power, Camera, Call, EndCall
+		    iOS: Home, VolumeUp, VolumeDown, Lock (Power button), Siri
+		"""
+		try:
+			logger.info(f'Sending keys: {keys}')
+
+			# Handle multiple keys separated by commas
+			if ',' in keys:
+				key_list = [key.strip() for key in keys.split(',')]
+				success = True
+				for key in key_list:
+					if not self._send_single_key(key):
+						success = False
+				return success
+			else:
+				return self._send_single_key(keys)
+
+		except Exception as e:
+			logger.error(f'Error sending keys "{keys}": {str(e)}')
+			return False
+
+	def _send_single_key(self, key: str) -> bool:
+		"""
+		Send a single key to the device
+
+		Args:
+		    key: The key to send
+
+		Returns:
+		    bool: True if key was sent successfully
+		"""
+		try:
+			# Platform-specific key mappings
+			if self.is_ios:
+				return self._send_ios_key(key.lower())
+			else:  # Assume Android for non-iOS
+				return self._send_android_key(key.lower())
+
+		except Exception as e:
+			logger.error(f'Error sending single key "{key}": {str(e)}')
+			return False
+
+	def _send_android_key(self, key: str) -> bool:
+		"""
+		Send a key using Android-specific methods
+
+		Args:
+		    key: The key to send
+
+		Returns:
+		    bool: True if key was sent successfully
+		"""
+		try:
+			# Android key code mappings
+			android_keycodes = {
+				'enter': 66,        # KEYCODE_ENTER
+				'back': 4,          # KEYCODE_BACK
+				'home': 3,          # KEYCODE_HOME
+				'menu': 82,         # KEYCODE_MENU
+				'delete': 67,       # KEYCODE_DEL
+				'backspace': 67,    # KEYCODE_DEL (alias)
+				'space': 62,        # KEYCODE_SPACE
+				'tab': 61,          # KEYCODE_TAB
+				'volume_up': 24,     # KEYCODE_VOLUME_UP
+				'volume_down': 25,   # KEYCODE_VOLUME_DOWN
+				'power': 26,        # KEYCODE_POWER
+				'escape': 111,      # KEYCODE_ESCAPE
+				'up': 19,           # KEYCODE_DPAD_UP
+				'down': 20,         # KEYCODE_DPAD_DOWN
+				'left': 21,         # KEYCODE_DPAD_LEFT
+				'right': 22,        # KEYCODE_DPAD_RIGHT
+				'center': 23,       # KEYCODE_DPAD_CENTER
+			}
+
+			# Check if it's a known Android keycode
+			if key in android_keycodes:
+				keycode = android_keycodes[key]
+				logger.info(f'Sending Android keycode {keycode} for key "{key}"')
+				self.driver.press_keycode(keycode)
+				return True
+
+			# Handle regular text input (send as characters)
+			if len(key) > 1 and key not in android_keycodes:
+				logger.info(f'Sending text input: "{key}"')
+				# Use the driver's type method for text input
+				self.driver.execute_script('mobile: type', {'text': key})
+				return True
+
+			# Handle single characters
+			if len(key) == 1:
+				logger.info(f'Sending single character: "{key}"')
+				self.driver.execute_script('mobile: type', {'text': key})
+				return True
+
+			logger.warning(f'Unknown Android key: "{key}"')
+			return False
+
+		except Exception as e:
+			logger.error(f'Error sending Android key "{key}": {str(e)}')
+			return False
+
+	def _send_ios_key(self, key: str) -> bool:
+		"""
+		Send a key using iOS-specific methods
+
+		Args:
+		    key: The key to send
+
+		Returns:
+		    bool: True if key was sent successfully
+		"""
+		try:
+			# iOS doesn't have direct keycode support like Android
+			# We use XCUITest commands for special keys
+			
+			ios_keys = {
+				'home': 'home',
+				'volumeup': 'volumeUp',
+				'volumedown': 'volumeDown',
+				'lock': 'lock',  # Power button
+				'siri': 'siri',
+			}
+
+			# Check if it's a known iOS key
+			if key in ios_keys:
+				ios_key = ios_keys[key]
+				logger.info(f'Sending iOS key "{ios_key}" for key "{key}"')
+				self.driver.execute_script('mobile: pressButton', {'name': ios_key})
+				return True
+
+			# Handle special keys using mobile commands
+			if key in ['enter', 'delete', 'backspace']:
+				logger.info(f'Sending iOS keyboard key: "{key}"')
+				if key == 'enter':
+					# Send return key
+					self.driver.execute_script('mobile: type', {'text': '\n'})
+				elif key in ['delete', 'backspace']:
+					# Send delete key
+					self.driver.execute_script('mobile: type', {'text': '\b'})
+				return True
+
+			# Handle regular text input
+			if len(key) > 1 and key not in ios_keys:
+				logger.info(f'Sending iOS text input: "{key}"')
+				self.driver.execute_script('mobile: type', {'text': key})
+				return True
+
+			# Handle single characters
+			if len(key) == 1:
+				logger.info(f'Sending iOS single character: "{key}"')
+				self.driver.execute_script('mobile: type', {'text': key})
+				return True
+
+			logger.warning(f'Unknown iOS key: "{key}"')
+			return False
+
+		except Exception as e:
+			logger.error(f'Error sending iOS key "{key}": {str(e)}')
+			return False
