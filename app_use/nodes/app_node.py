@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-logger = logging.getLogger('AppNode')
+logger = logging.getLogger(__name__)
 
 
 # ----------------------------------------------------------------------

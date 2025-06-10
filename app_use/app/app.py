@@ -25,7 +25,7 @@ from app_use.nodes.app_node import AppElementNode, AppState
 from app_use.nodes.appium_tree_builder import AppiumElementTreeBuilder
 from app_use.utils import time_execution_sync
 
-logger = logging.getLogger('AppiumApp')
+logger = logging.getLogger(__name__)
 
 
 class App:
@@ -274,32 +274,6 @@ class App:
 			except Exception as e:
 				logger.error(f'Error entering text by text: {str(e)}')
 
-		# Priority 4: Try by element type
-		try:
-			logger.info(f'Trying to enter text by type: {target_node.tag_name}')
-			if self.platform_name.lower() == 'android':
-				element = self.driver.find_element(AppiumBy.CLASS_NAME, target_node.tag_name)
-			else:
-				element = self.driver.find_element(AppiumBy.CLASS_NAME, target_node.tag_name)
-			element.clear()
-			element.send_keys(text)
-			logger.info('Successfully entered text using type')
-			return True
-		except Exception as e:
-			logger.error(f'Error entering text by type: {str(e)}')
-
-		# Priority 5: Try by XPath as final fallback
-		try:
-			logger.info('Trying to enter text by XPath')
-			xpath = self._build_xpath_for_node(target_node)
-			element = self.driver.find_element(AppiumBy.XPATH, xpath)
-			element.clear()
-			element.send_keys(text)
-			logger.info('Successfully entered text using XPath')
-			return True
-		except Exception as e:
-			logger.error(f'Error entering text by XPath: {str(e)}')
-
 		logger.error(f'Failed to enter text in element with highlight_index: {highlight_index}')
 		return False
 
@@ -332,7 +306,7 @@ class App:
 			except Exception as e:
 				logger.error(f'Error with coordinate-based click: {str(e)}')
 
-		# Priority 2: Try by key/semantics first (most reliable)
+		# Priority 2: Try by key/semantics first
 		if target_node.key:
 			try:
 				logger.info(f'Trying to click by key: {target_node.key}')
@@ -371,31 +345,6 @@ class App:
 				return True
 			except Exception as e:
 				logger.error(f'Error clicking by text: {str(e)}')
-
-		# Priority 4: Try by element type
-		try:
-			logger.info(f'Trying to click by type: {target_node.tag_name}')
-			if self.platform_name.lower() == 'android':
-				element = self.driver.find_element(AppiumBy.CLASS_NAME, target_node.tag_name)
-			else:
-				element = self.driver.find_element(AppiumBy.CLASS_NAME, target_node.tag_name)
-			element.click()
-			logger.info('Successfully clicked using type')
-			return True
-		except Exception as e:
-			logger.error(f'Error clicking by type: {str(e)}')
-
-		# Priority 5: Try by XPath as final fallback
-		try:
-			logger.info('Trying to click by XPath')
-			xpath = self._build_xpath_for_node(target_node)
-			logger.info(f'Using fallback XPath: {xpath}')
-			element = self.driver.find_element(AppiumBy.XPATH, xpath)
-			element.click()
-			logger.info('Successfully clicked using XPath')
-			return True
-		except Exception as e:
-			logger.error(f'Error clicking by XPath: {str(e)}')
 
 		logger.error(f'Failed to click on element with highlight_index: {highlight_index}')
 		return False

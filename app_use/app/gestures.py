@@ -4,7 +4,7 @@ from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
 
-logger = logging.getLogger('AppGestures')
+logger = logging.getLogger(__name__)
 
 
 class GestureService:

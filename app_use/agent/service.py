@@ -84,7 +84,7 @@ class Agent(Generic[Context]):
 		sensitive_data: dict[str, str] | None = None,
 		initial_actions: list[dict[str, dict[str, Any]]] | None = None,
 		# Agent settings
-		use_vision: bool = False,
+		use_vision: bool = True,
 		save_conversation_path: str | None = None,
 		save_conversation_path_encoding: str | None = 'utf-8',
 		max_failures: int = 3,
