@@ -1,6 +1,8 @@
 import base64
 import logging
+import re
 import time
+import xml.etree.ElementTree as ET
 from io import BytesIO
 
 import cv2
@@ -64,9 +66,8 @@ class AppiumElementTreeBuilder:
 		start_time = time.time()
 		try:
 			page_source = self.driver.page_source
-			import xml.etree.ElementTree as ET
-
 			root = ET.fromstring(page_source)
+			print(page_source)
 			# Get screen dimensions for viewport calculations
 			try:
 				size = self.driver.get_window_size()
@@ -187,6 +188,7 @@ class AppiumElementTreeBuilder:
 			attributes.get('text', None)
 			or attributes.get('content-desc', None)
 			or attributes.get('name', None)
+			or attributes.get('label', None)  # iOS accessibility label
 			or attributes.get('value', None)
 		)
 
@@ -214,8 +216,6 @@ class AppiumElementTreeBuilder:
 		if bounds and screen_width and screen_height:
 			try:
 				# Android/iOS bounds: [x1,y1][x2,y2]
-				import re
-
 				m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
 				if m:
 					x1, y1, x2, y2 = map(int, m.groups())
@@ -236,6 +236,38 @@ class AppiumElementTreeBuilder:
 					is_in_viewport = x2 > expanded_left and x1 < expanded_right and y2 > expanded_top and y1 < expanded_bottom
 			except Exception as e:
 				logger.debug(f"Error parsing bounds '{bounds}': {e}")
+		elif screen_width and screen_height:
+			try:
+				# iOS format: separate x, y, width, height attributes
+				x = attributes.get('x')
+				y = attributes.get('y')
+				width = attributes.get('width')
+				height = attributes.get('height')
+				
+				if x is not None and y is not None and width is not None and height is not None:
+					x1, y1 = int(x), int(y)
+					w, h = int(width), int(height)
+					x2, y2 = x1 + w, y1 + h
+					
+					# For iOS, check both size and visible attribute
+					is_visible = w > 0 and h > 0 and attributes.get('visible', 'true').lower() == 'true'
+
+					# For mobile apps, viewport coordinates and page coordinates are the same
+					viewport_coordinates = CoordinateSet(x=x1, y=y1, width=w, height=h)
+					page_coordinates = CoordinateSet(x=x1, y=y1, width=w, height=h)
+
+					# Calculate if element is in expanded viewport
+					expanded_top = -viewport_expansion
+					expanded_bottom = screen_height + viewport_expansion
+					expanded_left = -viewport_expansion
+					expanded_right = screen_width + viewport_expansion
+					is_in_viewport = x2 > expanded_left and x1 < expanded_right and y2 > expanded_top and y1 < expanded_bottom
+			except Exception as e:
+				logger.debug(f"Error parsing iOS coordinates: {e}")
+		
+		# Final fallback: check iOS visible attribute even without coordinates
+		if platform_type.lower() == 'ios' and viewport_coordinates is None:
+			is_visible = attributes.get('visible', 'true').lower() == 'true'
 
 		highlight_index = None
 		if is_interactive and is_visible and is_in_viewport:
@@ -420,6 +452,27 @@ class AppiumElementTreeBuilder:
 
 			# Convert PIL Image to OpenCV format (RGB to BGR)
 			screenshot_cv = cv2.cvtColor(np.array(screenshot_image), cv2.COLOR_RGB2BGR)
+			
+			# Get actual screenshot dimensions
+			screenshot_height, screenshot_width = screenshot_cv.shape[:2]
+			
+			# Get reported screen dimensions from driver
+			try:
+				driver_size = self.driver.get_window_size()
+				driver_width = driver_size['width']
+				driver_height = driver_size['height']
+			except Exception:
+				logger.warning('Could not get driver window size, using screenshot dimensions')
+				driver_width = screenshot_width
+				driver_height = screenshot_height
+			
+			# Calculate scaling factors to handle device pixel ratio differences
+			scale_x = screenshot_width / driver_width if driver_width > 0 else 1.0
+			scale_y = screenshot_height / driver_height if driver_height > 0 else 1.0
+			
+			logger.debug(f'Screenshot dimensions: {screenshot_width}x{screenshot_height}')
+			logger.debug(f'Driver window size: {driver_width}x{driver_height}')
+			logger.debug(f'Scaling factors: x={scale_x:.2f}, y={scale_y:.2f}')
 
 			# Define color for highlighted elements (red)
 			highlight_color = (0, 0, 255)  # Red for highlighted/selector map elements
@@ -430,16 +483,23 @@ class AppiumElementTreeBuilder:
 			logger.debug(f'Drawing {len(app_state.selector_map)} highlighted interactive elements...')
 			for highlight_index, node in app_state.selector_map.items():
 				if node and node.viewport_coordinates:
-					x = int(node.viewport_coordinates.x)
-					y = int(node.viewport_coordinates.y)
-					width = int(node.viewport_coordinates.width)
-					height = int(node.viewport_coordinates.height)
+					# Apply scaling to coordinates
+					x = int(node.viewport_coordinates.x * scale_x)
+					y = int(node.viewport_coordinates.y * scale_y)
+					width = int(node.viewport_coordinates.width * scale_x)
+					height = int(node.viewport_coordinates.height * scale_y)
+					
+					# Ensure coordinates are within screenshot bounds
+					x = max(0, min(x, screenshot_width - 1))
+					y = max(0, min(y, screenshot_height - 1))
+					x2 = max(x + 1, min(x + width, screenshot_width))
+					y2 = max(y + 1, min(y + height, screenshot_height))
 
 					# Draw rectangle
 					cv2.rectangle(
 						screenshot_cv,
 						(x, y),
-						(x + width, y + height),
+						(x2, y2),
 						highlight_color,
 						2,
 					)
@@ -456,9 +516,9 @@ class AppiumElementTreeBuilder:
 						label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
 					)
 
-					# Position on the right side with small offset from the right edge
-					label_x = x + width - label_width - 5
-					label_y = y + label_height + 5
+					# Position on the right side with small offset from the right edge (using scaled coordinates)
+					label_x = max(0, min(x2 - label_width - 5, screenshot_width - label_width))
+					label_y = max(label_height, min(y + label_height + 5, screenshot_height))
 
 					# Draw background rectangle for better visibility
 					cv2.rectangle(
@@ -497,4 +557,5 @@ class AppiumElementTreeBuilder:
 
 		except Exception as e:
 			logger.error(f'Error drawing bounding boxes on screenshot: {str(e)}')
+			return ''
 			return ''

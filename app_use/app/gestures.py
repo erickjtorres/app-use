@@ -36,7 +36,7 @@ class GestureService:
 			logger.warning(f'Unexpected error while detecting platformName: {err}')
 			self.is_ios = False
 
-	def swipe(self, start_x, start_y, end_x, end_y, duration: int = 300, percent: float = 0.8):
+	def swipe(self, start_x, start_y, end_x, end_y, duration: int = 300, percent: float = 0.2):
 		"""
 		Perform a swipe gesture
 
@@ -312,17 +312,10 @@ class GestureService:
 
 		Args:
 		    keys: String representing the key(s) to send. Supports:
-		        - Single keys: "Enter", "Back", "Home", "Delete", "Space", "Tab"
-		        - Text strings: "Hello World" (sent as individual characters)
-		        - Multiple keys: "Enter,Back,Home" (comma-separated)
+		        - Single keys: "Enter", "Back", "Delete"
 
 		Returns:
 		    bool: True if keys were sent successfully
-
-		Supported mobile keys:
-		    Android: Enter, Back, Home, Menu, Search, Delete, Space, Tab, 
-		             VolumeUp, VolumeDown, Power, Camera, Call, EndCall
-		    iOS: Home, VolumeUp, VolumeDown, Lock (Power button), Siri
 		"""
 		try:
 			logger.info(f'Sending keys: {keys}')
@@ -378,21 +371,8 @@ class GestureService:
 			android_keycodes = {
 				'enter': 66,        # KEYCODE_ENTER
 				'back': 4,          # KEYCODE_BACK
-				'home': 3,          # KEYCODE_HOME
-				'menu': 82,         # KEYCODE_MENU
 				'delete': 67,       # KEYCODE_DEL
 				'backspace': 67,    # KEYCODE_DEL (alias)
-				'space': 62,        # KEYCODE_SPACE
-				'tab': 61,          # KEYCODE_TAB
-				'volume_up': 24,     # KEYCODE_VOLUME_UP
-				'volume_down': 25,   # KEYCODE_VOLUME_DOWN
-				'power': 26,        # KEYCODE_POWER
-				'escape': 111,      # KEYCODE_ESCAPE
-				'up': 19,           # KEYCODE_DPAD_UP
-				'down': 20,         # KEYCODE_DPAD_DOWN
-				'left': 21,         # KEYCODE_DPAD_LEFT
-				'right': 22,        # KEYCODE_DPAD_RIGHT
-				'center': 23,       # KEYCODE_DPAD_CENTER
 			}
 
 			# Check if it's a known Android keycode
@@ -435,21 +415,6 @@ class GestureService:
 		try:
 			# iOS doesn't have direct keycode support like Android
 			# We use XCUITest commands for special keys
-			
-			ios_keys = {
-				'home': 'home',
-				'volumeup': 'volumeUp',
-				'volumedown': 'volumeDown',
-				'lock': 'lock',  # Power button
-				'siri': 'siri',
-			}
-
-			# Check if it's a known iOS key
-			if key in ios_keys:
-				ios_key = ios_keys[key]
-				logger.info(f'Sending iOS key "{ios_key}" for key "{key}"')
-				self.driver.execute_script('mobile: pressButton', {'name': ios_key})
-				return True
 
 			# Handle special keys using mobile commands
 			if key in ['enter', 'delete', 'backspace']:
@@ -460,12 +425,6 @@ class GestureService:
 				elif key in ['delete', 'backspace']:
 					# Send delete key
 					self.driver.execute_script('mobile: type', {'text': '\b'})
-				return True
-
-			# Handle regular text input
-			if len(key) > 1 and key not in ios_keys:
-				logger.info(f'Sending iOS text input: "{key}"')
-				self.driver.execute_script('mobile: type', {'text': key})
 				return True
 
 			# Handle single characters

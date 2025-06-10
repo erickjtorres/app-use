@@ -303,7 +303,7 @@ class Controller(Generic[Context]):
 				)
 
 		@self.registry.action(
-			'Send keyboard keys (Enter, Back, Home, etc.) - useful for mobile navigation and completing text input',
+			'Send keyboard keys (Enter, Delete, Backspace, etc.) - useful for mobile navigation and completing text input',
 			param_model=SendKeysAction,
 		)
 		async def send_keys(params: SendKeysAction, app: App) -> ActionResult:
