@@ -77,6 +77,28 @@ GROK_API_KEY=
 NOVITA_API_KEY=
 ```
 
+## DEMOS
+
+<table>
+<tr>
+<td width="15%">
+
+**Ordering Shorts from the Lululemon App (iOS)**
+
+![agent_history](https://github.com/user-attachments/assets/f6130f2e-48c6-4130-8146-1bd141ea101a)
+
+</td>
+<td width="15%">
+
+**Searching for someone on Twitter and making a post on their profile (Android)**
+
+![findingsomeone](https://github.com/user-attachments/assets/5fa64755-1602-4a48-bf2b-c2b2c0976b43)
+
+</td>
+</tr>
+</table>
+
+
 ## Community & Support
 
 Contributions are welcome! Please feel free to submit a Pull Request.
