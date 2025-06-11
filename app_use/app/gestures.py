@@ -414,23 +414,29 @@ class GestureService:
 		"""
 		try:
 			# iOS doesn't have direct keycode support like Android
-			# We use XCUITest commands for special keys
+			# We use XCUITest keyboard commands for special keys
 
 			# Handle special keys using mobile commands
 			if key in ['enter', 'delete', 'backspace']:
 				logger.info(f'Sending iOS keyboard key: "{key}"')
 				if key == 'enter':
-					# Send return key
-					self.driver.execute_script('mobile: type', {'text': '\n'})
+					# Send return key using mobile: keys
+					self.driver.execute_script('mobile: keys', {'keys': [{'key': 'return'}]})
 				elif key in ['delete', 'backspace']:
-					# Send delete key
-					self.driver.execute_script('mobile: type', {'text': '\b'})
+					# Send delete key using mobile: keys
+					self.driver.execute_script('mobile: keys', {'keys': [{'key': 'delete'}]})
+				return True
+
+			# Handle text strings - send as text instead of individual keys
+			if len(key) > 1 and key not in ['enter', 'delete', 'backspace']:
+				logger.info(f'Sending iOS text: "{key}"')
+				self.driver.execute_script('mobile: keys', {'keys': [{'text': key}]})
 				return True
 
 			# Handle single characters
 			if len(key) == 1:
 				logger.info(f'Sending iOS single character: "{key}"')
-				self.driver.execute_script('mobile: type', {'text': key})
+				self.driver.execute_script('mobile: keys', {'keys': [{'text': key}]})
 				return True
 
 			logger.warning(f'Unknown iOS key: "{key}"')

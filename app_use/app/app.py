@@ -17,6 +17,7 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
+from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -58,6 +59,7 @@ class App:
 		self.driver = None
 		self.element_tree_builder = None
 		self.gesture_service = None
+		self._cached_state = None
 
 		if platform_name.lower() == 'android':
 			if not device_name:
@@ -177,41 +179,20 @@ class App:
 			include_highlights=include_highlights,
 		)
 		# Screenshot is now handled by the tree builder
+		self._cached_state = app_state
 		return app_state
 
 	def get_selector_map(self, viewport_expansion: int = 0, debug_mode: bool = False):
+		if self._cached_state:
+			logger.debug('Using cached app state')
+			return self._cached_state.selector_map
 		state = self.get_app_state(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
 		return state.selector_map
 
-	def click_by_highlight_index(
-		self,
-		highlight_index: int,
-		viewport_expansion: int = 0,
-		debug_mode: bool = False,
-	) -> bool:
-		selector_map = self.get_selector_map(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
-		node = selector_map.get(highlight_index)
-		if not node:
-			logger.error(f'No element found with highlight_index: {highlight_index}')
-			return False
-		return self.click_element_by_highlight_index(highlight_index)
-
-	def scroll_to_highlight_index(
-		self,
-		highlight_index: int,
-		viewport_expansion: int = 0,
-		debug_mode: bool = False,
-	) -> bool:
-		selector_map = self.get_selector_map(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
-		node = selector_map.get(highlight_index)
-		if not node:
-			logger.error(f'No element found with highlight_index: {highlight_index}')
-			return False
-		return self.scroll_into_view_by_highlight_index(highlight_index)
 
 	def enter_text_with_highlight_index(self, highlight_index: int, text: str) -> bool:
-		app_state = self.get_app_state()
-		target_node = app_state.selector_map.get(highlight_index)
+		selector_map = self.get_selector_map()
+		target_node = selector_map.get(highlight_index)
 
 		if not target_node:
 			logger.error(f'No element found with highlight_index: {highlight_index}')
@@ -245,7 +226,12 @@ class App:
 				if self.platform_name.lower() == 'android':
 					element = self.driver.find_element(AppiumBy.ID, target_node.key)
 				else:
-					element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, target_node.key)
+					# For iOS, try multiple selectors for the key
+					try:
+						element = self.driver.find_element(AppiumBy.ACCESSIBILITY_ID, target_node.key)
+					except NoSuchElementException:
+						# Try by name attribute
+						element = self.driver.find_element(AppiumBy.NAME, target_node.key)
 				element.clear()
 				element.send_keys(text)
 				logger.info('Successfully entered text using key')
@@ -253,7 +239,38 @@ class App:
 			except Exception as e:
 				logger.error(f'Error entering text by key: {str(e)}')
 
-		# Priority 3: Try by text content
+		# Priority 3: Try by element type and other attributes for iOS text fields
+		if self.platform_name.lower() == 'ios' and target_node.tag_name in ['XCUIElementTypeSearchField', 'XCUIElementTypeTextField', 'XCUIElementTypeSecureTextField']:
+			try:
+				logger.info(f'Trying to find iOS text field by type: {target_node.tag_name}')
+				# Try to find by element type and any available attribute
+				xpath_parts = [f'name()="{target_node.tag_name}"']
+				
+				if target_node.key:
+					xpath_parts.append(f'(@name="{target_node.key}" or @accessibilityIdentifier="{target_node.key}")')
+				
+				if target_node.text:
+					xpath_parts.append(f'(@value="{target_node.text}" or @label="{target_node.text}")')
+				
+				# If we have coordinates, try to find elements near them
+				if target_node.viewport_coordinates:
+					# Build a more flexible xpath
+					xpath = f'//{target_node.tag_name}'
+					if len(xpath_parts) > 1:
+						xpath += f'[{" and ".join(xpath_parts[1:])}]'
+				else:
+					xpath = f'//*[{" and ".join(xpath_parts)}]'
+				
+				logger.info(f'Using xpath: {xpath}')
+				element = self.driver.find_element(AppiumBy.XPATH, xpath)
+				element.clear()
+				element.send_keys(text)
+				logger.info('Successfully entered text using iOS text field type')
+				return True
+			except Exception as e:
+				logger.error(f'Error entering text by iOS text field type: {str(e)}')
+
+		# Priority 4: Try by text content
 		if target_node.text:
 			try:
 				logger.info(f"Trying to enter text by text: '{target_node.text}'")
@@ -274,12 +291,43 @@ class App:
 			except Exception as e:
 				logger.error(f'Error entering text by text: {str(e)}')
 
+		# Priority 5: Final fallback - click coordinates and use focused element
+		if target_node.viewport_coordinates:
+			try:
+				logger.info('Trying final fallback: click coordinates and send to focused element')
+				center_x, center_y = self.get_element_center_coordinates(target_node)
+				
+				# Click to focus the element
+				if self.click_coordinates(center_x, center_y):
+					time.sleep(0.5)  # Wait for focus
+					
+					# Try to get the currently focused element and send text to it
+					try:
+						focused_element = self.driver.switch_to.active_element
+						if focused_element:
+							focused_element.clear()
+							focused_element.send_keys(text)
+							logger.info('Successfully entered text using focused element fallback')
+							return True
+					except Exception as focus_error:
+						logger.warning(f'Focused element method failed: {focus_error}')
+						
+					# If focused element doesn't work, try sending keys to the app
+					if self.platform_name.lower() == 'ios':
+						logger.info('Trying to send keys directly to iOS app')
+						self.driver.execute_script('mobile: keys', {'keys': [{'text': text}]})
+						logger.info('Successfully sent text using direct keys')
+						return True
+						
+			except Exception as e:
+				logger.error(f'Error with final fallback method: {str(e)}')
+
 		logger.error(f'Failed to enter text in element with highlight_index: {highlight_index}')
 		return False
 
 	def click_element_by_highlight_index(self, highlight_index: int) -> bool:
-		app_state = self.get_app_state()
-		target_node = app_state.selector_map.get(highlight_index)
+		selector_map = self.get_selector_map()
+		target_node = selector_map.get(highlight_index)
 
 		if not target_node:
 			logger.error(f'No element found with highlight_index: {highlight_index}')
@@ -350,8 +398,8 @@ class App:
 		return False
 
 	def scroll_into_view_by_highlight_index(self, highlight_index: int) -> bool:
-		app_state = self.get_app_state()
-		target_node = app_state.selector_map.get(highlight_index)
+		selector_map = self.get_selector_map()
+		target_node = selector_map.get(highlight_index)
 
 		if not target_node:
 			logger.error(f'No element found with highlight_index: {highlight_index}')
@@ -474,8 +522,8 @@ class App:
 		return False
 
 	def ensure_element_visible_by_highlight_index(self, highlight_index: int, timeout: int = 5) -> bool:
-		app_state = self.get_app_state()
-		target_node = app_state.selector_map.get(highlight_index)
+		selector_map = self.get_selector_map()
+		target_node = selector_map.get(highlight_index)
 
 		if not target_node:
 			logger.error(f'No element found with highlight_index: {highlight_index}')
@@ -759,13 +807,48 @@ class App:
 				if self.platform_name.lower() == 'android':
 					self.driver.press_keycode(67)  # KEYCODE_DEL
 				else:
-					# For iOS, use backspace
-					self.driver.execute_script('mobile: type', {'text': '\b'})
+					# For iOS, use keyboard actions to clear text
+					# Send Cmd+A to select all, then delete
+					self.driver.execute_script('mobile: keys', {
+						'keys': [
+							{'key': 'command', 'modifierFlags': 1},
+							{'key': 'a'}
+						]
+					})
+					time.sleep(0.1)
+					self.driver.execute_script('mobile: keys', {'keys': [{'key': 'delete'}]})
 			except Exception as e:
 				logger.debug(f'Could not clear existing text: {str(e)}')
 
 			# Input the text
-			self.driver.execute_script('mobile: type', {'text': text})
+			if self.platform_name.lower() == 'android':
+				self.driver.execute_script('mobile: type', {'text': text})
+			else:
+				# For iOS, try multiple methods
+				try:
+					# Method 1: Use mobile: keys (preferred)
+					self.driver.execute_script('mobile: keys', {'keys': [{'text': text}]})
+				except Exception as keys_error:
+					logger.warning(f'mobile: keys failed: {keys_error}, trying fallback')
+					try:
+						# Method 2: Use element.send_keys if we can find the focused element
+						active_element = self.driver.switch_to.active_element
+						if active_element:
+							active_element.send_keys(text)
+						else:
+							raise Exception("No active element found")
+					except Exception as fallback_error:
+						logger.warning(f'Fallback method failed: {fallback_error}, trying W3C actions')
+						# Method 3: Use W3C Actions to type character by character
+						from selenium.webdriver.common.actions.action_builder import ActionBuilder
+						from selenium.webdriver.common.actions.pointer_input import PointerInput
+						from selenium.webdriver.common.actions import interaction
+						
+						actions = ActionBuilder(self.driver)
+						for char in text:
+							actions.key_action.key_down(char)
+							actions.key_action.key_up(char)
+						actions.perform()
 			logger.info('Successfully input text')
 			return True
 		except Exception as e:

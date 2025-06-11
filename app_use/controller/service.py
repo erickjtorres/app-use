@@ -155,9 +155,8 @@ class Controller(Generic[Context]):
 						include_in_memory=True,
 					)
 
-				app_state = app.get_app_state()
-
-				if params.index not in app_state.selector_map:
+				selector_map = app.get_selector_map()
+				if params.index not in selector_map:
 					return ActionResult(
 						success=False,
 						error=f'Element with highlight index {params.index} not found',
@@ -193,9 +192,9 @@ class Controller(Generic[Context]):
 						include_in_memory=True,
 					)
 
-				app_state = app.get_app_state()
+				selector_map = app.get_selector_map()
 
-				if params.index not in app_state.selector_map:
+				if params.index not in selector_map:
 					return ActionResult(
 						success=False,
 						error=f'Element with highlight index {params.index} not found',
@@ -495,8 +494,8 @@ class Controller(Generic[Context]):
 		)
 		async def select_dropdown_option(params: SelectDropdownOptionAction, app: App) -> ActionResult:
 			try:
-				app_state = app.get_app_state()
-				target_node = app_state.selector_map.get(params.index)
+				selector_map = app.get_selector_map()
+				target_node = selector_map.get(params.index)
 				if not target_node:
 					return ActionResult(
 						success=False,

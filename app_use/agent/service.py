@@ -362,7 +362,6 @@ class Agent(Generic[Context]):
 			try:
 				# Get the model's next action based on current state
 				model_output = await self.get_next_action(input_messages)
-				print(model_output)
 				# Check for empty actions and handle them
 				if (
 					not model_output.action

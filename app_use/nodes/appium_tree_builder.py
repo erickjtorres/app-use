@@ -67,7 +67,6 @@ class AppiumElementTreeBuilder:
 		try:
 			page_source = self.driver.page_source
 			root = ET.fromstring(page_source)
-			print(page_source)
 			# Get screen dimensions for viewport calculations
 			try:
 				size = self.driver.get_window_size()
