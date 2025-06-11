@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.1] - 2024-XX-XX
+## [0.0.1] - 2025-06-11
 ### Added
 - Initial release
 - Mobile app automation with Appium
