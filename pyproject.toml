@@ -4,21 +4,29 @@ build-backend = "hatchling.build"
 
 [project]
 name = "app-use"
-version = "0.0.1"
 description = "Make mobile apps accessible for AI agents"
+authors = [{ name = "Erick Torres-Moreno" }]
+version = "0.0.1"
 readme = "README.md"
-authors = [
-    {name = "Erick Torres-Moreno"},
-]
-license = {text = "MIT"}
+requires-python = ">=3.11,<4.0"
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-
-requires-python = ">=3.11,<4.0"
+keywords = [
+    "ai",
+    "automation", 
+    "mobile",
+    "mobile-use",
+    "app-use",
+    "appium",
+    "agent",
+    "ios",
+    "android",
+    "ui-automation",
+    "browser-use"
+]
 dependencies = [
     # Core
     "pydantic>=2.11.5",
@@ -55,6 +63,7 @@ all = [
 ]
 
 [project.urls]
+Repository = "https://github.com/app-use/app-use"
 Homepage = "https://github.com/app-use/app-use"
 "Bug Tracker" = "https://github.com/app-use/app-use/issues"
 Documentation = "https://github.com/app-use/app-use#readme"
@@ -64,6 +73,7 @@ include = [
     "app_use/**/*.py",
     "!app_use/**/tests/*.py",
     "!app_use/**/tests.py",
+    "app_use/agent/system_prompt.md",
 ]
 
 [tool.pyright]
