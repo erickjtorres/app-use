@@ -430,14 +430,40 @@ class GestureService:
 			# Handle text strings - send as text instead of individual keys
 			if len(key) > 1 and key not in ['enter', 'delete', 'backspace']:
 				logger.info(f'Sending iOS text: "{key}"')
-				self.driver.execute_script('mobile: keys', {'keys': [{'text': key}]})
-				return True
+				try:
+					# Try mobile: type first (newer method)
+					self.driver.execute_script('mobile: type', {'text': key})
+					return True
+				except Exception as type_error:
+					logger.warning(f'mobile: type failed: {type_error}, trying character-by-character')
+					# Send each character individually using mobile: keys
+					try:
+						for char in key:
+							if char == ' ':
+								self.driver.execute_script('mobile: keys', {'keys': [{'key': 'space'}]})
+							elif char == '\n':
+								self.driver.execute_script('mobile: keys', {'keys': [{'key': 'return'}]})
+							else:
+								self.driver.execute_script('mobile: keys', {'keys': [{'key': char}]})
+						return True
+					except Exception as char_error:
+						logger.error(f'Character-by-character input failed: {char_error}')
+						return False
 
 			# Handle single characters
 			if len(key) == 1:
 				logger.info(f'Sending iOS single character: "{key}"')
-				self.driver.execute_script('mobile: keys', {'keys': [{'text': key}]})
-				return True
+				try:
+					# Try mobile: type first
+					self.driver.execute_script('mobile: type', {'text': key})
+					return True
+				except Exception:
+					# Fallback to mobile: keys with proper key format
+					if key == ' ':
+						self.driver.execute_script('mobile: keys', {'keys': [{'key': 'space'}]})
+					else:
+						self.driver.execute_script('mobile: keys', {'keys': [{'key': key}]})
+					return True
 
 			logger.warning(f'Unknown iOS key: "{key}"')
 			return False

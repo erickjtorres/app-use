@@ -792,31 +792,59 @@ class App:
 			# Wait a moment for the field to focus
 			time.sleep(0.5)
 
-			# Clear any existing text by selecting all and deleting
+			# Clear any existing text - use more efficient methods
 			try:
 				logger.debug('Attempting to clear existing text')
-				# Triple-tap to select all text (common mobile gesture)
-				self.click_coordinates(x, y)
-				time.sleep(0.1)
-				self.click_coordinates(x, y)
-				time.sleep(0.1) 
-				self.click_coordinates(x, y)
-				time.sleep(0.2)
 				
-				# Send delete key to clear selected text
 				if self.platform_name.lower() == 'android':
-					self.driver.press_keycode(67)  # KEYCODE_DEL
+					# For Android, try to use active element clear first
+					try:
+						active_element = self.driver.switch_to.active_element
+						if active_element:
+							active_element.clear()
+							logger.debug('Successfully cleared text using active element')
+						else:
+							# Fallback to keycode delete
+							self.driver.press_keycode(67)  # KEYCODE_DEL
+					except Exception:
+						self.driver.press_keycode(67)  # KEYCODE_DEL
 				else:
-					# For iOS, use keyboard actions to clear text
-					# Send Cmd+A to select all, then delete
-					self.driver.execute_script('mobile: keys', {
-						'keys': [
-							{'key': 'command', 'modifierFlags': 1},
-							{'key': 'a'}
-						]
-					})
-					time.sleep(0.1)
-					self.driver.execute_script('mobile: keys', {'keys': [{'key': 'delete'}]})
+					# For iOS, try more efficient clearing methods
+					cleared = False
+					
+					# Method 1: Try to use active element clear (most efficient)
+					try:
+						active_element = self.driver.switch_to.active_element
+						if active_element:
+							active_element.clear()
+							logger.debug('Successfully cleared text using active element')
+							cleared = True
+					except Exception as clear_error:
+						logger.debug(f'Active element clear failed: {clear_error}')
+					
+					# Method 2: If element clear failed, try select all + delete
+					if not cleared:
+						try:
+							# Use proper iOS select all command
+							self.driver.execute_script('mobile: selectText', {})
+							time.sleep(0.1)
+							self.driver.execute_script('mobile: keys', {'keys': [{'key': 'delete'}]})
+							logger.debug('Successfully cleared text using select all + delete')
+							cleared = True
+						except Exception as select_error:
+							logger.debug(f'Select all method failed: {select_error}')
+					
+					# Method 3: Fallback to multiple deletes only if other methods failed
+					if not cleared:
+						try:
+							logger.debug('Using multiple delete fallback')
+							# Send fewer deletes to be more efficient
+							for _ in range(20):  # Reduced from 50 to 20
+								self.driver.execute_script('mobile: keys', {'keys': [{'key': 'delete'}]})
+								time.sleep(0.01)
+							logger.debug('Completed multiple delete fallback')
+						except Exception as delete_error:
+							logger.debug(f'Multiple delete method failed: {delete_error}')
 			except Exception as e:
 				logger.debug(f'Could not clear existing text: {str(e)}')
 
@@ -826,29 +854,49 @@ class App:
 			else:
 				# For iOS, try multiple methods
 				try:
-					# Method 1: Use mobile: keys (preferred)
-					self.driver.execute_script('mobile: keys', {'keys': [{'text': text}]})
-				except Exception as keys_error:
-					logger.warning(f'mobile: keys failed: {keys_error}, trying fallback')
+					# Method 1: Use element.send_keys if we can find the focused element
+					active_element = self.driver.switch_to.active_element
+					if active_element:
+						active_element.send_keys(text)
+						logger.info('Successfully used active element send_keys')
+					else:
+						raise Exception("No active element found")
+				except Exception as fallback_error:
+					logger.warning(f'Active element method failed: {fallback_error}, trying mobile type')
 					try:
-						# Method 2: Use element.send_keys if we can find the focused element
-						active_element = self.driver.switch_to.active_element
-						if active_element:
-							active_element.send_keys(text)
-						else:
-							raise Exception("No active element found")
-					except Exception as fallback_error:
-						logger.warning(f'Fallback method failed: {fallback_error}, trying W3C actions')
-						# Method 3: Use W3C Actions to type character by character
-						from selenium.webdriver.common.actions.action_builder import ActionBuilder
-						from selenium.webdriver.common.actions.pointer_input import PointerInput
-						from selenium.webdriver.common.actions import interaction
-						
-						actions = ActionBuilder(self.driver)
-						for char in text:
-							actions.key_action.key_down(char)
-							actions.key_action.key_up(char)
-						actions.perform()
+						# Method 2: Use mobile type for iOS (UiAutomation2 style)
+						self.driver.execute_script('mobile: type', {'text': text})
+						logger.info('Successfully used mobile: type')
+					except Exception as type_error:
+						logger.warning(f'mobile: type failed: {type_error}, trying character-by-character')
+						# Method 3: Send each character individually using mobile: keys with proper format
+						try:
+							for char in text:
+								# Send each character as a separate key press
+								if char == ' ':
+									# Handle space character
+									self.driver.execute_script('mobile: keys', {'keys': [{'key': 'space'}]})
+								elif char == '\n':
+									# Handle newline
+									self.driver.execute_script('mobile: keys', {'keys': [{'key': 'return'}]})
+								else:
+									# For regular characters, iOS expects them as individual key presses
+									# Use the character code approach for compatibility
+									self.driver.execute_script('mobile: keys', {'keys': [{'key': char}]})
+							logger.info('Successfully used character-by-character input')
+						except Exception as char_error:
+							logger.warning(f'Character-by-character failed: {char_error}, using W3C actions as final fallback')
+							# Method 4: Use W3C Actions to type character by character
+							from selenium.webdriver.common.actions.action_builder import ActionBuilder
+							from selenium.webdriver.common.actions.pointer_input import PointerInput
+							from selenium.webdriver.common.actions import interaction
+							
+							actions = ActionBuilder(self.driver)
+							for char in text:
+								actions.key_action.key_down(char)
+								actions.key_action.key_up(char)
+							actions.perform()
+							logger.info('Successfully used W3C actions fallback')
 			logger.info('Successfully input text')
 			return True
 		except Exception as e:
