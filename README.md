@@ -1,5 +1,5 @@
-![logo](https://github.com/user-attachments/assets/d5747763-7788-4936-be90-6c22ed856d14)
 
+![Whisk_storyboard7ea3db2beb6746db94891e4e (1)](https://github.com/user-attachments/assets/293c7ccb-62c6-40b9-9ff5-eeacaeb34aaa)
 
 
 <h1 align="center">Enable AI to control your mobile apps 🤖</h1>
