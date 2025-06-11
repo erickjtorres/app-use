@@ -90,9 +90,10 @@ NOVITA_API_KEY=
 </td>
 <td width="15%">
 
-**Searching for someone on Twitter and making a post on their profile (Android)**
+**Ordering some tacos and a drink on DoorDash (IOS)**
 
-![findingsomeone](https://github.com/user-attachments/assets/5fa64755-1602-4a48-bf2b-c2b2c0976b43)
+![uber_eats_orders](https://github.com/user-attachments/assets/70789f61-ca55-4888-a87e-2dbba964cfc5)
+
 
 </td>
 </tr>
