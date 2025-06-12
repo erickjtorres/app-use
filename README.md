@@ -28,7 +28,7 @@ For memory functionality (requires Python<3.13 due to PyTorch compatibility):
 pip install "app-use[memory]"
 ```
 
-Install and the necessary drivers (XCUITest and UiAutomator2): [Appium](https://appium.io/docs/en/latest/)
+Install the necessary drivers and software: Check out our [environment setup](https://github.com/erickjtorres/app-use/blob/main/docs/env-setup.md) docs for more info!
 
 Define the app and mobile device you want to target:
 
