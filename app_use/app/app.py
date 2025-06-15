@@ -115,14 +115,30 @@ class App:
 					desired_caps['bundleId'] = self.bundle_id
 				desired_caps['automationName'] = 'XCUITest'
 				desired_caps['autoAcceptAlerts'] = True
+				
+				# Add iOS specific capabilities for better simulator handling
+				desired_caps['newCommandTimeout'] = 60
+				desired_caps['wdaLaunchTimeout'] = 60000
+				desired_caps['wdaConnectionTimeout'] = 60000
+				
+				# For simulators, explicitly set platformVersion and deviceName to avoid confusion
+				if self.device_name and len(self.device_name) > 20:  # Likely a UDID
+					desired_caps['udid'] = self.device_name
+					logger.info(f'Connecting to iOS device/simulator with UDID: {self.device_name[:8]}...')
+				else:
+					# If it's a short name, treat it as deviceName
+					logger.info(f'Connecting to iOS device/simulator: {self.device_name}')
 
 			desired_caps.update(self.additional_capabilities)
 
 			logger.info(f'Initializing Appium driver with capabilities: {desired_caps}')
+			
 			if self.platform_name.lower() == 'android':
 				options = UiAutomator2Options().load_capabilities(desired_caps)
 			else:
 				options = XCUITestOptions().load_capabilities(desired_caps)
+			
+			logger.info('Connecting to Appium server...')
 			self.driver = webdriver.Remote(self.appium_server_url, options=options)
 			self.driver.implicitly_wait(self.timeout)
 
@@ -131,7 +147,17 @@ class App:
 
 			logger.info('Appium driver initialized successfully')
 		except Exception as e:
-			logger.error(f'Error initializing Appium driver: {str(e)}')
+			# Add more specific error context for iOS issues
+			error_msg = f'Error initializing Appium driver: {str(e)}'
+			if self.platform_name.lower() == 'ios' and 'Could not create simulator' in str(e):
+				error_msg += '\n\n💡 This error suggests Appium is trying to create a new simulator instead of connecting to an existing one.'
+				error_msg += '\n   Possible solutions:'
+				error_msg += '\n   1. Make sure the iOS simulator is running and booted'
+				error_msg += '\n   2. Try selecting a different simulator'
+				error_msg += '\n   3. Restart the simulator and try again'
+				error_msg += f'\n   4. Device UDID being used: {self.device_name}'
+			
+			logger.error(error_msg)
 			raise
 
 	def _wait_for_page_and_frames_load(self, wait_time: float = 2.0) -> bool:
@@ -1072,7 +1098,7 @@ class App:
 	@staticmethod
 	def detect_android_app_activity(package_name: str, device_name: str = None) -> str:
 		"""
-		Detect the main activity of an Android app by its package name.
+		Detect the main activity of an Android app by its package name using multiple reliable methods.
 
 		Args:
 		    package_name: The package name of the app (e.g., 'com.example.myapp')
@@ -1085,145 +1111,167 @@ class App:
 			# Build the adb command with device specification if provided
 			device_flag = f'-s {device_name}' if device_name else ''
 
-			# Try multiple approaches to find the main activity
-			commands = [
-				# Method 1: Get launcher activity using monkey
-				f"adb {device_flag} shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1 2>&1 | grep 'Starting:' | head -1",
-				# Method 2: Use resolve-activity to get the launcher intent
-				f'adb {device_flag} shell cmd package resolve-activity --brief {package_name} | tail -n 1',
-				# Method 3: Get the default activity from dumpsys with better filtering
-				f"adb {device_flag} shell dumpsys package {package_name} | grep -A 10 'android.intent.action.MAIN' | grep -A 5 'android.intent.category.LAUNCHER'",
-				# Method 4: Query package manager for launcher activities
-				f"adb {device_flag} shell pm query-activities -a android.intent.action.MAIN -c android.intent.category.LAUNCHER | grep -A 5 '{package_name}'",
-			]
+			logger.info(f'Detecting main activity for package: {package_name}')
 
-			for i, command in enumerate(commands):
-				try:
-					logger.info(f'Trying method {i + 1} to detect activity for {package_name}')
-					result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=15)
-
-					if result.returncode == 0 and result.stdout.strip():
-						output = result.stdout.strip()
-						logger.debug(f'Command output: {output}')
-
-						# Parse the output based on the method used
-						if i == 0:  # monkey method - most reliable for launcher activities
-							# Look for "Starting: Intent { ... cmp=package/activity }"
-							activity_match = re.search(r'cmp=([^/]+)/([^}]+)', output)
-							if activity_match:
-								package, activity = activity_match.groups()
-								if package == package_name:
-									# Handle relative activity names (starting with .)
-									if activity.startswith('.'):
-										full_activity = package_name + activity
-									else:
-										full_activity = activity
-									logger.info(f'Detected main activity for {package_name}: {full_activity}')
-									return full_activity
-
-						elif i == 1:  # resolve-activity method
-							# Output should be the activity name directly
-							activity_match = re.search(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', output)
-							if activity_match:
-								package, activity = activity_match.groups()
-								if package == package_name:
-									if activity.startswith('.'):
-										full_activity = package_name + activity
-									else:
-										full_activity = activity
-									logger.info(f'Detected main activity for {package_name}: {full_activity}')
-									return full_activity
-
-						elif i == 2:  # dumpsys method with better filtering
-							lines = output.split('\n')
-							for j, line in enumerate(lines):
-								if 'android.intent.action.MAIN' in line:
-									# Look for activity info in the following lines
-									for k in range(j, min(j + 10, len(lines))):
-										activity_line = lines[k].strip()
-										# Look for ActivityInfo pattern and ensure it has LAUNCHER category
-										if 'ActivityInfo' in activity_line and 'LAUNCHER' in '\n'.join(lines[j : k + 5]):
-											activity_match = re.search(
-												r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)',
-												activity_line,
-											)
-											if activity_match:
-												package, activity = activity_match.groups()
-												if package == package_name:
-													if activity.startswith('.'):
-														full_activity = package_name + activity
-													else:
-														full_activity = activity
-													logger.info(f'Detected main activity for {package_name}: {full_activity}')
-													return full_activity
-
-						elif i == 3:  # pm query-activities method
-							# Look for activity patterns in package manager output
-							activity_matches = re.findall(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', output)
-							for package, activity in activity_matches:
-								if package == package_name:
-									if activity.startswith('.'):
-										full_activity = package_name + activity
-									else:
-										full_activity = activity
-									logger.info(f'Detected main activity for {package_name}: {full_activity}')
-									return full_activity
-
-				except subprocess.TimeoutExpired:
-					logger.warning(f'Method {i + 1} timed out')
-					continue
-				except Exception as e:
-					logger.warning(f'Method {i + 1} failed: {str(e)}')
-					continue
-
-			# Enhanced fallback: Try to launch the app and see what activity starts
+			# Method 1: Use pm dump to get the launcher activity (most reliable)
 			try:
-				logger.info(f'Trying to launch {package_name} to detect main activity...')
-				launch_command = f'adb {device_flag} shell am start -n {package_name}/ 2>&1'
-				result = subprocess.run(
-					launch_command,
-					shell=True,
-					capture_output=True,
-					text=True,
-					timeout=10,
-				)
+				logger.info('Method 1: Using pm dump to find launcher activity')
+				dump_command = f'adb {device_flag} shell pm dump {package_name}'
+				result = subprocess.run(dump_command, shell=True, capture_output=True, text=True, timeout=20)
 
-				# Check what activity was actually started
-				check_command = (
-					f"adb {device_flag} shell dumpsys activity activities | grep 'mResumedActivity' | grep '{package_name}'"
-				)
+				if result.returncode == 0:
+					output = result.stdout
+					# Look for Activity sections with MAIN action and LAUNCHER category
+					lines = output.split('\n')
+					current_activity = None
+					in_activity_section = False
+					has_main_action = False
+					has_launcher_category = False
+
+					for line in lines:
+						line = line.strip()
+						
+						# Check if we're entering an Activity section
+						if 'Activity #' in line and 'filter' in line:
+							# Reset flags for new activity
+							in_activity_section = True
+							has_main_action = False
+							has_launcher_category = False
+							# Extract activity name from the line
+							activity_match = re.search(r'([a-zA-Z0-9_.]+)/([a-zA-Z0-9_.$]+)', line)
+							if activity_match:
+								current_activity = activity_match.group(2)
+								if current_activity.startswith('.'):
+									current_activity = package_name + current_activity
+								logger.debug(f'Found activity: {current_activity}')
+						
+						elif in_activity_section:
+							if 'android.intent.action.MAIN' in line:
+								has_main_action = True
+								logger.debug(f'Activity {current_activity} has MAIN action')
+							elif 'android.intent.category.LAUNCHER' in line:
+								has_launcher_category = True
+								logger.debug(f'Activity {current_activity} has LAUNCHER category')
+							elif line == '' or 'Activity #' in line:
+								# End of current activity section
+								if has_main_action and has_launcher_category and current_activity:
+									logger.info(f'Found launcher activity via pm dump: {current_activity}')
+									return current_activity
+								in_activity_section = False
+
+					# Check the last activity if we reached end of file
+					if in_activity_section and has_main_action and has_launcher_category and current_activity:
+						logger.info(f'Found launcher activity via pm dump (end of file): {current_activity}')
+						return current_activity
+
+			except Exception as e:
+				logger.warning(f'pm dump method failed: {str(e)}')
+
+			# Method 2: Use cmd package resolve-activity (Android 7+)
+			try:
+				logger.info('Method 2: Using cmd package resolve-activity')
+				resolve_command = f'adb {device_flag} shell cmd package resolve-activity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER {package_name}'
+				result = subprocess.run(resolve_command, shell=True, capture_output=True, text=True, timeout=10)
+
+				if result.returncode == 0 and result.stdout.strip():
+					output = result.stdout.strip()
+					# Look for "name=" in the output which indicates the activity
+					name_match = re.search(r'name=([^\s]+)', output)
+					if name_match:
+						activity = name_match.group(1)
+						if activity.startswith('.'):
+							activity = package_name + activity
+						logger.info(f'Found launcher activity via resolve-activity: {activity}')
+						return activity
+
+			except Exception as e:
+				logger.warning(f'resolve-activity method failed: {str(e)}')
+
+			# Method 3: Use monkey to actually launch and see what starts
+			try:
+				logger.info('Method 3: Using monkey to detect launcher activity')
+				monkey_command = f'adb {device_flag} shell monkey -p {package_name} -c android.intent.category.LAUNCHER 1'
+				result = subprocess.run(monkey_command, shell=True, capture_output=True, text=True, timeout=10)
+
+				if result.returncode == 0:
+					# Look in both stdout and stderr for the activity information
+					full_output = result.stdout + '\n' + result.stderr
+					
+					# Look for "Starting: Intent" pattern
+					intent_match = re.search(r'Starting: Intent \{[^}]*cmp=([^/]+)/([^}\s]+)', full_output)
+					if intent_match:
+						package, activity = intent_match.groups()
+						if package == package_name:
+							if activity.startswith('.'):
+								activity = package_name + activity
+							logger.info(f'Found launcher activity via monkey: {activity}')
+							return activity
+
+			except Exception as e:
+				logger.warning(f'monkey method failed: {str(e)}')
+
+			# Method 4: Try launching the app with intent and check what starts
+			try:
+				logger.info('Method 4: Launch with intent and check running activity')
+				
+				# Launch the app using intent
+				intent_command = f'adb {device_flag} shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n {package_name}/'
+				subprocess.run(intent_command, shell=True, capture_output=True, timeout=5)
+				
+				# Wait a moment for the app to start
+				time.sleep(2)
+				
+				# Check what activity is currently running
+				check_command = f"adb {device_flag} shell dumpsys activity activities | grep -E 'mResumedActivity.*{package_name}|mFocusedActivity.*{package_name}'"
 				result = subprocess.run(check_command, shell=True, capture_output=True, text=True, timeout=5)
 
 				if result.returncode == 0 and result.stdout.strip():
-					activity_match = re.search(r'(\w+(?:\.\w+)*)/(\.\w+|\w+(?:\.\w+)*)', result.stdout)
+					# Parse the activity from the dumpsys output
+					activity_match = re.search(r'([^/\s]+)/([^/\s}]+)', result.stdout)
 					if activity_match:
 						package, activity = activity_match.groups()
 						if package == package_name:
 							if activity.startswith('.'):
-								full_activity = package_name + activity
-							else:
-								full_activity = activity
-							logger.info(f'Detected activity by launch test: {full_activity}')
-							return full_activity
+								activity = package_name + activity
+							logger.info(f'Found launcher activity via intent launch: {activity}')
+							return activity
+
 			except Exception as e:
-				logger.warning(f'Launch test method failed: {str(e)}')
+				logger.warning(f'intent launch method failed: {str(e)}')
+
+			# Method 5: Check known activity patterns for specific apps
+			known_activities = {
+				'com.google.android.youtube': 'com.google.android.youtube.app.honeycomb.Shell$HomeActivity',
+				'com.android.chrome': 'com.google.android.apps.chrome.Main',
+				'com.android.settings': 'com.android.settings.Settings',
+				'com.google.android.gm': 'com.google.android.gm.ConversationListActivityGmail',
+				'com.whatsapp': 'com.whatsapp.HomeActivity',
+				'com.facebook.katana': 'com.facebook.katana.LoginActivity',
+				'com.instagram.android': 'com.instagram.mainactivity.MainActivity',
+			}
+
+			if package_name in known_activities:
+				logger.info(f'Using known activity pattern: {known_activities[package_name]}')
+				return known_activities[package_name]
 
 			# Final fallback: Try common activity naming patterns
-			common_activities = [
+			common_patterns = [
 				f'{package_name}.MainActivity',
-				f'{package_name}.main.MainActivity',
+				f'{package_name}.main.MainActivity', 
 				f'{package_name}.ui.MainActivity',
 				f'{package_name}.activities.MainActivity',
+				f'{package_name}.activity.MainActivity',
+				f'{package_name}.app.MainActivity',
 				f'{package_name}.StartActivity',
 				f'{package_name}.LaunchActivity',
 				f'{package_name}.SplashActivity',
 				f'{package_name}.HomeActivity',
 			]
 
-			logger.warning(f'Could not auto-detect activity for {package_name}, trying common patterns...')
-			for activity in common_activities:
-				logger.info(f'Trying fallback activity: {activity}')
-				return activity  # Return the first common pattern to try
+			logger.warning(f'All detection methods failed for {package_name}, trying common patterns...')
+			for activity in common_patterns:
+				logger.info(f'Fallback: trying {activity}')
+				return activity  # Return the first pattern to try
 
 		except Exception as e:
 			logger.error(f'Unexpected error detecting app activity: {str(e)}')
