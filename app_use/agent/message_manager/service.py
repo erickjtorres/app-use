@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class MessageManagerSettings(BaseModel):
 	"""Settings for the message manager"""
 

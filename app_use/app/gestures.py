@@ -369,10 +369,10 @@ class GestureService:
 		try:
 			# Android key code mappings
 			android_keycodes = {
-				'enter': 66,        # KEYCODE_ENTER
-				'back': 4,          # KEYCODE_BACK
-				'delete': 67,       # KEYCODE_DEL
-				'backspace': 67,    # KEYCODE_DEL (alias)
+				'enter': 66,  # KEYCODE_ENTER
+				'back': 4,  # KEYCODE_BACK
+				'delete': 67,  # KEYCODE_DEL
+				'backspace': 67,  # KEYCODE_DEL (alias)
 			}
 
 			# Check if it's a known Android keycode

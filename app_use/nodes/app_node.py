@@ -53,7 +53,7 @@ class AppBaseNode:
 class AppTextNode(AppBaseNode):
 	"""A leaf node that only contains text."""
 
-	text: str = ""
+	text: str = ''
 	type: str = 'TEXT_NODE'
 
 	def has_parent_with_highlight_index(self) -> bool:
@@ -90,32 +90,32 @@ class AppElementNode(AppBaseNode):
 	"""Represents any UI element other than a raw text leaf."""
 
 	# Core identification - using highlight_index as primary selector like browser-use
-	tag_name: str = ""  # e.g., Button, TextField, ListView, etc.
-	
+	tag_name: str = ''  # e.g., Button, TextField, ListView, etc.
+
 	# Element attributes and properties
 	attributes: Dict[str, str] = field(default_factory=dict)
 	children: List[AppBaseNode] = field(default_factory=list)
-	
+
 	# Interaction and visibility
 	is_interactive: bool = False
 	is_top_element: bool = False
 	is_in_viewport: bool = False
-	
+
 	# Mobile-specific properties
 	text: Optional[str] = None
 	key: Optional[str] = None  # Flutter key or accessibility identifier
-	
+
 	# Highlighting for automation - primary selector like browser-use
 	highlight_index: Optional[int] = None
-	
+
 	# Coordinate information
 	viewport_coordinates: Optional[CoordinateSet] = None
 	page_coordinates: Optional[CoordinateSet] = None
 	viewport_info: Optional[ViewportInfo] = None
-	
+
 	# Shadow DOM equivalent for mobile (e.g., custom components)
 	shadow_root: bool = False
-	
+
 	# State tracking for dynamic UIs
 	is_new: Optional[bool] = None
 
@@ -140,15 +140,15 @@ class AppElementNode(AppBaseNode):
 
 	def __repr__(self) -> str:
 		tag_str = f'<{self.tag_name}'
-		
+
 		# Add key attributes
 		if self.key:
 			tag_str += f' key="{self.key}"'
 		if self.text:
 			tag_str += f' text="{self.text[:50]}{"..." if len(self.text) > 50 else ""}"'
-		
+
 		tag_str += '>'
-		
+
 		# Add status indicators
 		extras = []
 		if self.is_interactive:
@@ -163,16 +163,17 @@ class AppElementNode(AppBaseNode):
 			extras.append('in-viewport')
 		if self.is_new:
 			extras.append('new')
-		
+
 		if extras:
 			tag_str += f' [{", ".join(extras)}]'
-		
+
 		return tag_str
 
 	@cached_property
 	def hash(self) -> 'HashedAppElement':
 		"""Return cached hash for history tree comparisons."""
 		from app_use.nodes.history_tree_processor.service import HistoryTreeProcessor
+
 		return HistoryTreeProcessor._hash_app_element(self)
 
 	def add_child(self, child: AppBaseNode) -> None:
@@ -182,46 +183,47 @@ class AppElementNode(AppBaseNode):
 
 	def get_node_path(self) -> str:
 		"""Get a human-readable path to this element in the UI tree.
-		
+
 		Returns a string representation of the path from the root to this element,
 		similar to an XPath but using tag names and indices to uniquely identify the location.
-		
+
 		Returns:
 			str: A path string like "/App/MainView/Button[2]" representing the element's location
 		"""
 		path_parts = []
 		current = self
-		
+
 		# Build the path from current element to root
 		while current is not None:
 			# Count siblings of the same type to determine index
 			if current.parent is not None:
 				siblings_of_same_type = [
-					child for child in current.parent.children 
+					child
+					for child in current.parent.children
 					if isinstance(child, AppElementNode) and child.tag_name == current.tag_name
 				]
-				
+
 				# Find the index of this element among siblings of the same type
 				element_index = 0
 				for i, sibling in enumerate(siblings_of_same_type):
 					if sibling is current:
 						element_index = i
 						break
-				
+
 				# Add index if there are multiple siblings of the same type
 				if len(siblings_of_same_type) > 1:
-					path_parts.append(f"{current.tag_name}[{element_index}]")
+					path_parts.append(f'{current.tag_name}[{element_index}]')
 				else:
 					path_parts.append(current.tag_name)
 			else:
 				# Root element
 				path_parts.append(current.tag_name)
-			
+
 			current = current.parent
-		
+
 		# Reverse to get path from root to current element
 		path_parts.reverse()
-		return "/" + "/".join(path_parts) if path_parts else "/"
+		return '/' + '/'.join(path_parts) if path_parts else '/'
 
 	def get_all_text_till_next_interactive_element(self, max_depth: int = -1) -> str:
 		"""Get all text content until hitting another interactive element."""
@@ -264,11 +266,10 @@ class AppElementNode(AppBaseNode):
 
 					text = node.get_all_text_till_next_interactive_element()
 					attributes_str = ''
-					
+
 					if include_attributes and node.attributes:
 						attributes_to_include = {
-							key: str(value) for key, value in node.attributes.items() 
-							if key in include_attributes and value
+							key: str(value) for key, value in node.attributes.items() if key in include_attributes and value
 						}
 
 						# Optimization: if tag_name == class attribute, don't include it
@@ -276,8 +277,7 @@ class AppElementNode(AppBaseNode):
 							attributes_to_include.pop('class', None)
 
 						# Optimization: if text content == content-desc, don't include it
-						if (attributes_to_include.get('content-desc', '').strip() == text.strip() 
-							and text.strip()):
+						if attributes_to_include.get('content-desc', '').strip() == text.strip() and text.strip():
 							attributes_to_include.pop('content-desc', None)
 
 						if attributes_to_include:
@@ -285,7 +285,7 @@ class AppElementNode(AppBaseNode):
 
 					# Build the line
 					highlight_indicator = f'*[{node.highlight_index}]*' if node.is_new else f'[{node.highlight_index}]'
-					
+
 					line = f'{depth_str}{highlight_indicator}<{node.tag_name}'
 
 					if attributes_str:
@@ -307,10 +307,12 @@ class AppElementNode(AppBaseNode):
 
 			elif isinstance(node, AppTextNode):
 				# Add text only if it doesn't have a highlighted parent
-				if (not node.has_parent_with_highlight_index() 
-					and node.parent 
-					and node.parent.is_visible 
-					and node.parent.is_top_element):
+				if (
+					not node.has_parent_with_highlight_index()
+					and node.parent
+					and node.parent.is_visible
+					and node.parent.is_top_element
+				):
 					formatted_text.append(f'{depth_str}{node.text}')
 
 		process_node(self, 0)
@@ -383,8 +385,18 @@ class AppNodeUtils:
 
 	@staticmethod
 	def find_nodes_by_type(nodes, type_str):
-		"""Find nodes by element type"""
-		return [node for node in nodes if type_str.lower() in node.tag_name.lower()]
+		"""Find nodes by element type (normalized or original)"""
+		return [
+			node
+			for node in nodes
+			if type_str.lower() in node.tag_name.lower()
+			or (hasattr(node, 'attributes') and node.attributes.get('_original_type', '').lower().find(type_str.lower()) >= 0)
+		]
+
+	@staticmethod
+	def find_nodes_by_normalized_type(nodes, normalized_type):
+		"""Find nodes by their normalized element type"""
+		return [node for node in nodes if node.tag_name.lower() == normalized_type.lower()]
 
 	@staticmethod
 	def find_nodes_by_text(nodes, text_str):
@@ -402,16 +414,14 @@ class AppNodeUtils:
 
 	@staticmethod
 	def categorize_ui_elements(nodes):
-		"""Categorize UI elements by their function"""
+		"""Categorize UI elements by their function using normalized types"""
 		categorized = {
 			'navigation': [],
 			'input': [],
 			'buttons': [],
 			'text': [],
 			'images': [],
-			'cards': [],
-			'lists': [],
-			'tiles': [],
+			'interactive': [],
 			'containers': [],
 			'other': [],
 		}
@@ -420,50 +430,32 @@ class AppNodeUtils:
 			# Skip text nodes since they're not UI elements to categorize
 			if isinstance(node, AppTextNode):
 				continue
-				
-			tag_name = node.tag_name.lower()
-			description = str(node.attributes.get('content-desc', '')).lower()
 
-			# Categorize based on type and description
-			if any(
-				nav in tag_name or nav in description
-				for nav in [
-					'appbar',
-					'navigation',
-					'bottombar',
-					'drawer',
-					'home',
-					'profile',
-					'menu',
-					'nav',
-				]
+			normalized_type = node.tag_name.lower()
+			description = str(node.attributes.get('content-desc', '')).lower()
+			text_content = str(node.text or '').lower()
+
+			# Categorize based on normalized type first, then description
+			if normalized_type in ['navbar', 'navigation'] or any(
+				nav in description or nav in text_content
+				for nav in ['navigation', 'menu', 'nav', 'home', 'profile', 'back', 'drawer']
 			):
 				categorized['navigation'].append(node)
-			elif any(inp in tag_name or inp in description for inp in ['textfield', 'input', 'search', 'form']):
-				categorized['input'].append(node)
-			elif any(btn in tag_name or btn in description for btn in ['button', 'gesture', 'inkwell']):
-				categorized['buttons'].append(node)
-			elif 'text' in tag_name and 'field' not in tag_name:
-				categorized['text'].append(node)
-			elif any(img in tag_name or img in description for img in ['image', 'icon', 'picture']):
-				categorized['images'].append(node)
-			elif any(crd in tag_name or crd in description for crd in ['card', 'product']):
-				categorized['cards'].append(node)
-			elif any(lst in tag_name or lst in description for lst in ['list', 'grid', 'view']):
-				categorized['lists'].append(node)
-			elif any(tile in tag_name or tile in description for tile in ['tile', 'item']):
-				categorized['tiles'].append(node)
-			elif any(
-				container in tag_name
-				for container in [
-					'container',
-					'box',
-					'padding',
-					'column',
-					'row',
-					'stack',
-				]
+			elif normalized_type in ['input', 'search', 'textarea'] or any(
+				inp in description or inp in text_content for inp in ['input', 'search', 'form', 'field']
 			):
+				categorized['input'].append(node)
+			elif normalized_type in ['button'] or any(
+				btn in description or btn in text_content for btn in ['button', 'tap', 'click', 'press']
+			):
+				categorized['buttons'].append(node)
+			elif normalized_type in ['text']:
+				categorized['text'].append(node)
+			elif normalized_type in ['image']:
+				categorized['images'].append(node)
+			elif node.is_interactive:
+				categorized['interactive'].append(node)
+			elif normalized_type in ['container', 'scroll', 'list', 'grid', 'table']:
 				categorized['containers'].append(node)
 			else:
 				categorized['other'].append(node)
@@ -471,8 +463,28 @@ class AppNodeUtils:
 		return categorized
 
 	@staticmethod
+	def get_interactive_elements_by_type(nodes):
+		"""Get interactive elements grouped by their normalized type"""
+		interactive_by_type = {}
+
+		for node in nodes:
+			if node.is_interactive:
+				normalized_type = node.tag_name
+				if normalized_type not in interactive_by_type:
+					interactive_by_type[normalized_type] = []
+				interactive_by_type[normalized_type].append(node)
+
+		return interactive_by_type
+
+	@staticmethod
+	def find_form_elements(nodes):
+		"""Find form-related elements (inputs, buttons, selects, etc.)"""
+		form_types = {'input', 'button', 'select', 'checkbox', 'radio', 'switch', 'slider'}
+		return [node for node in nodes if node.tag_name.lower() in form_types]
+
+	@staticmethod
 	def extract_text_content(nodes):
-		"""Find all text content in the UI"""
+		"""Find all text content in the UI with improved extraction"""
 		text_content = {}
 
 		for node in nodes:
@@ -480,44 +492,37 @@ class AppNodeUtils:
 			if node.text:
 				# Use highlight_index as key if available, otherwise use a generic counter
 				node_key = f'highlight_{node.highlight_index}' if node.highlight_index is not None else f'node_{id(node)}'
-				text_content[node_key] = node.text
+				text_content[node_key] = {
+					'text': node.text,
+					'type': node.tag_name,
+					'interactive': node.is_interactive,
+					'visible': node.is_visible,
+				}
 
-			# Text elements with content-desc
-			if 'Text' in node.tag_name and 'content-desc' in node.attributes:
-				text = str(node.attributes['content-desc'])
-				node_key = f'text_{node.highlight_index}' if node.highlight_index is not None else f'text_{id(node)}'
-				text_content[node_key] = text
+			# Extract text from various attribute sources
+			attribute_sources = [
+				('content-desc', 'desc'),
+				('textPreview', 'preview'),
+				('data', 'data'),
+				('label', 'label'),
+				('hint', 'hint'),
+				('name', 'name'),
+				('value', 'value'),
+			]
 
-			# Text preview available
-			if 'textPreview' in node.attributes:
-				node_key = f'preview_{node.highlight_index}' if node.highlight_index is not None else f'preview_{id(node)}'
-				text_content[node_key] = node.attributes['textPreview']
-
-			# Data property
-			if 'data' in node.attributes and isinstance(node.attributes['data'], str):
-				node_key = f'data_{node.highlight_index}' if node.highlight_index is not None else f'data_{id(node)}'
-				text_content[node_key] = node.attributes['data']
-
-			# Label property
-			if 'label' in node.attributes and isinstance(node.attributes['label'], str):
-				node_key = f'label_{node.highlight_index}' if node.highlight_index is not None else f'label_{id(node)}'
-				text_content[node_key] = node.attributes['label']
-
-			# Hint property
-			if 'hint' in node.attributes and isinstance(node.attributes['hint'], str):
-				node_key = f'hint_{node.highlight_index}' if node.highlight_index is not None else f'hint_{id(node)}'
-				text_content[node_key] = node.attributes['hint']
-
-			# Extract text from content-desc that might contain actual UI text
-			if (
-				'content-desc' in node.attributes
-				and 'Text' not in node.tag_name
-				and isinstance(node.attributes['content-desc'], str)
-			):
-				desc = node.attributes['content-desc']
-				# Only include if it looks like actual content
-				if not any(c in desc for c in ['_', '[', '{', '<']) and 1 < len(desc) < 50:
-					node_key = f'desc_{node.highlight_index}' if node.highlight_index is not None else f'desc_{id(node)}'
-					text_content[node_key] = desc
+			for attr_name, prefix in attribute_sources:
+				if attr_name in node.attributes and isinstance(node.attributes[attr_name], str):
+					attr_value = node.attributes[attr_name]
+					if attr_value and len(attr_value.strip()) > 0:
+						node_key = (
+							f'{prefix}_{node.highlight_index}' if node.highlight_index is not None else f'{prefix}_{id(node)}'
+						)
+						text_content[node_key] = {
+							'text': attr_value,
+							'type': node.tag_name,
+							'source': attr_name,
+							'interactive': node.is_interactive,
+							'visible': node.is_visible,
+						}
 
 		return text_content

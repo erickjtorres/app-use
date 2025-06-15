@@ -19,6 +19,80 @@ from app_use.nodes.app_node import (
 logger = logging.getLogger('AppiumApp')
 
 
+# Platform-specific class mappings for better element type normalization
+ANDROID_CLASS_MAPPING = {
+	'android.widget.TextView': 'text',
+	'android.widget.Button': 'button',
+	'android.widget.ImageButton': 'button',
+	'android.widget.ImageView': 'image',
+	'android.widget.EditText': 'input',
+	'android.widget.CheckBox': 'checkbox',
+	'android.widget.CheckedTextView': 'checkbox',
+	'android.widget.ToggleButton': 'button',
+	'android.widget.RadioButton': 'radio',
+	'android.widget.Spinner': 'select',
+	'android.widget.Switch': 'switch',
+	'android.widget.SeekBar': 'slider',
+	'android.widget.VideoView': 'video',
+	'android.widget.SearchView': 'search',
+	'android.widget.ListView': 'list',
+	'android.widget.GridView': 'grid',
+	'android.widget.ScrollView': 'scroll',
+	'android.view.ViewGroup': 'container',
+}
+
+IOS_CLASS_MAPPING = {
+	'XCUIElementTypeStaticText': 'text',
+	'XCUIElementTypeButton': 'button',
+	'XCUIElementTypeImage': 'image',
+	'XCUIElementTypeTextField': 'input',
+	'XCUIElementTypeSecureTextField': 'input',
+	'XCUIElementTypeSwitch': 'switch',
+	'XCUIElementTypeSlider': 'slider',
+	'XCUIElementTypeCell': 'cell',
+	'XCUIElementTypeTable': 'table',
+	'XCUIElementTypeNavigationBar': 'navbar',
+	'XCUIElementTypeApplication': 'app',
+	'XCUIElementTypeWindow': 'window',
+	'XCUIElementTypePicker': 'picker',
+	'XCUIElementTypePickerWheel': 'picker',
+	'XCUIElementTypePageIndicator': 'indicator',
+	'XCUIElementTypeKey': 'key',
+	'XCUIElementTypeKeyboard': 'keyboard',
+	'XCUIElementTypeLink': 'link',
+	'XCUIElementTypeSearchField': 'search',
+	'XCUIElementTypeTextView': 'textarea',
+	'XCUIElementTypeWebView': 'webview',
+	'XCUIElementTypeOther': 'other',
+}
+
+# Interactive element types by platform
+ANDROID_INTERACTIVE_TYPES = {
+	'android.widget.Button',
+	'android.widget.ImageButton',
+	'android.widget.EditText',
+	'android.widget.CheckBox',
+	'android.widget.RadioButton',
+	'android.widget.Switch',
+	'android.widget.Spinner',
+	'android.widget.SeekBar',
+	'android.widget.ToggleButton',
+	'android.widget.SearchView',
+}
+
+IOS_INTERACTIVE_TYPES = {
+	'XCUIElementTypeButton',
+	'XCUIElementTypeTextField',
+	'XCUIElementTypeSecureTextField',
+	'XCUIElementTypeSwitch',
+	'XCUIElementTypeSlider',
+	'XCUIElementTypeCell',
+	'XCUIElementTypeLink',
+	'XCUIElementTypeSearchField',
+	'XCUIElementTypeKey',
+}
+
+
 class AppiumElementTreeBuilder:
 	"""
 	Builds element trees from Appium page source XML, with highlight indices and visibility tracking
@@ -67,6 +141,7 @@ class AppiumElementTreeBuilder:
 		try:
 			page_source = self.driver.page_source
 			root = ET.fromstring(page_source)
+
 			# Get screen dimensions for viewport calculations
 			try:
 				size = self.driver.get_window_size()
@@ -89,6 +164,14 @@ class AppiumElementTreeBuilder:
 			)
 
 			all_nodes = self._collect_all_nodes(root_node)
+
+			# Sort nodes by position (top-to-bottom, left-to-right) for consistent ordering
+			interactive_nodes = [node for node in all_nodes if node.highlight_index is not None]
+			self._sort_nodes_by_position(interactive_nodes)
+
+			# Reassign highlight indices after sorting
+			self._reassign_highlight_indices(interactive_nodes)
+
 			selector_map = self._selector_map.copy()
 			self._perf_metrics['build_tree_time'] = time.time() - start_time
 			self._perf_metrics['node_count'] = len(all_nodes)
@@ -98,35 +181,8 @@ class AppiumElementTreeBuilder:
 			# Create AppState with optional highlighted screenshot
 			app_state = AppState(element_tree=root_node, selector_map=selector_map)
 
-			# ------------------------------------------------------------------
 			# Calculate viewport scroll information (pixels above and below)
-			# ------------------------------------------------------------------
-			try:
-				# Gather page-coordinate bounds of *all* nodes and nodes currently in the viewport
-				all_coords = [
-					(node.page_coordinates.y, node.page_coordinates.y + node.page_coordinates.height)
-					for node in all_nodes
-					if getattr(node, "page_coordinates", None)
-				]
-				visible_coords = [
-					(node.page_coordinates.y, node.page_coordinates.y + node.page_coordinates.height)
-					for node in all_nodes
-					if getattr(node, "page_coordinates", None) and node.is_in_viewport
-				]
-
-				if all_coords and visible_coords:
-					total_top = min(y1 for y1, _ in all_coords)
-					total_bottom = max(y2 for _, y2 in all_coords)
-					visible_top = min(y1 for y1, _ in visible_coords)
-					visible_bottom = max(y2 for _, y2 in visible_coords)
-
-					# Pixels scrolled above the current viewport
-					app_state.pixels_above = max(0, int(visible_top - total_top))
-					# Pixels remaining to scroll below the current viewport
-					app_state.pixels_below = max(0, int(total_bottom - visible_bottom))
-			except Exception as e:
-				# Non-fatal – just log in debug mode so the rest of the builder continues.
-				logger.debug(f'Failed to compute scroll pixels: {e}')
+			self._calculate_scroll_info(app_state, all_nodes)
 
 			# Add screenshot to the node state
 			try:
@@ -175,37 +231,158 @@ class AppiumElementTreeBuilder:
 		    AppElementNode: The parsed element node
 		"""
 		attributes = element.attrib
+		platform_lower = platform_type.lower()
 
-		if platform_type.lower() == 'android':
-			node_type = attributes.get('class', 'Unknown')
-		elif platform_type.lower() == 'ios':
-			node_type = attributes.get('type', 'Unknown')
-		else:
-			node_type = 'Unknown'
+		# Get original class/type and map to normalized type
+		original_type = self._get_element_type(attributes, platform_lower)
+		normalized_type = self._normalize_element_type(original_type, platform_lower)
 
-		text = (
-			attributes.get('text', None)
-			or attributes.get('content-desc', None)
-			or attributes.get('name', None)
-			or attributes.get('label', None)  # iOS accessibility label
-			or attributes.get('value', None)
-		)
+		# Extract text content
+		text = self._extract_text_content(attributes, platform_lower)
 
 		# Extract unique identifier (key) for reliable element selection
-		# This represents the most reliable way to find the element programmatically
-		key = None
-		if platform_type.lower() == 'android':
-			# Use resource-id as the unique identifier for Android elements
-			# This corresponds to AppiumBy.ID in Appium selectors
-			key = attributes.get('resource-id', None)
-		elif platform_type.lower() == 'ios':
-			# For iOS, prioritize accessibility-id over name as the unique identifier
-			# This corresponds to AppiumBy.ACCESSIBILITY_ID in Appium selectors
-			key = attributes.get('accessibility-id', None) or attributes.get('name', None)
+		key = self._extract_element_key(attributes, platform_lower)
 
-		is_interactive = self._is_element_interactive(attributes, node_type, platform_type)
+		# Determine if element is interactive
+		is_interactive = self._is_element_interactive(attributes, original_type, platform_lower)
 
-		# Parse bounds and calculate coordinates
+		# Parse coordinates and visibility
+		viewport_coordinates, page_coordinates, is_visible, is_in_viewport = self._parse_coordinates(
+			attributes, screen_width, screen_height, viewport_expansion, platform_lower
+		)
+
+		# Handle highlighting for interactive elements
+		highlight_index = None
+		if is_interactive and is_visible and is_in_viewport:
+			highlight_index = self._highlight_index
+			self._selector_map[highlight_index] = None
+			self._highlight_index += 1
+
+		# Build node properties
+		props = dict(attributes)
+		props['_is_visible'] = is_visible
+		props['_is_in_viewport'] = is_in_viewport
+		props['_original_type'] = original_type
+		props['_normalized_type'] = normalized_type
+
+		node = AppElementNode(
+			tag_name=normalized_type,
+			is_interactive=is_interactive,
+			attributes=props,
+			parent=parent,
+			text=text,
+			key=key,
+			viewport_coordinates=viewport_coordinates,
+			page_coordinates=page_coordinates,
+			viewport_info=viewport_info,
+			is_in_viewport=is_in_viewport,
+			is_visible=is_visible,
+			highlight_index=highlight_index,
+		)
+
+		# Parse children
+		for child_element in element:
+			child_node = self._parse_element(
+				child_element,
+				node,
+				platform_type,
+				screen_width,
+				screen_height,
+				viewport_expansion,
+				debug_mode,
+				viewport_info,
+			)
+			if child_node:
+				node.add_child(child_node)
+
+		# Update selector map
+		if highlight_index is not None:
+			self._selector_map[highlight_index] = node
+
+		return node
+
+	def _get_element_type(self, attributes, platform_type):
+		"""Get the element type based on platform"""
+		if platform_type == 'android':
+			return attributes.get('class', 'Unknown')
+		elif platform_type == 'ios':
+			return attributes.get('type', 'Unknown')
+		else:
+			return 'Unknown'
+
+	def _normalize_element_type(self, original_type, platform_type):
+		"""Normalize element type using class mappings"""
+		if platform_type == 'android':
+			return ANDROID_CLASS_MAPPING.get(original_type, original_type)
+		elif platform_type == 'ios':
+			return IOS_CLASS_MAPPING.get(original_type, original_type)
+		else:
+			return original_type
+
+	def _extract_text_content(self, attributes, platform_type):
+		"""Extract text content from element attributes"""
+		if platform_type == 'android':
+			return attributes.get('text', None) or attributes.get('content-desc', None)
+		elif platform_type == 'ios':
+			return attributes.get('name', None) or attributes.get('label', None) or attributes.get('value', None)
+		else:
+			return None
+
+	def _extract_element_key(self, attributes, platform_type):
+		"""Extract unique identifier (key) for reliable element selection"""
+		if platform_type == 'android':
+			return attributes.get('resource-id', None)
+		elif platform_type == 'ios':
+			return attributes.get('accessibility-id', None) or attributes.get('name', None)
+		else:
+			return None
+
+	def _is_element_interactive(self, attributes, element_type, platform_type):
+		"""
+		Determine if an element is interactive using simplified logic
+
+		Args:
+		    attributes: Element attributes
+		    element_type: Original element type
+		    platform_type: The platform type (e.g., "android", "ios")
+
+		Returns:
+		    bool: True if the element is likely interactive, False otherwise
+		"""
+		if platform_type == 'android':
+			# Primary check: clickable attribute
+			if attributes.get('clickable', 'false').lower() == 'true':
+				return True
+
+			# Secondary check: known interactive types
+			if element_type in ANDROID_INTERACTIVE_TYPES:
+				return True
+
+			# Special case: ViewGroup with focus and enabled
+			if (
+				element_type == 'android.view.ViewGroup'
+				and attributes.get('focusable', 'false').lower() == 'true'
+				and attributes.get('enabled', 'false').lower() == 'true'
+			):
+				return True
+
+		elif platform_type == 'ios':
+			# Check if element is enabled first
+			if attributes.get('enabled', 'false').lower() != 'true':
+				return False
+
+			# Known interactive types
+			if element_type in IOS_INTERACTIVE_TYPES:
+				return True
+
+			# XCUIElementTypeOther can be interactive if accessible
+			if element_type == 'XCUIElementTypeOther' and attributes.get('accessible', 'false').lower() == 'true':
+				return True
+
+		return False
+
+	def _parse_coordinates(self, attributes, screen_width, screen_height, viewport_expansion, platform_type):
+		"""Parse element coordinates and determine visibility"""
 		bounds = attributes.get('bounds', None)
 		viewport_coordinates = None
 		page_coordinates = None
@@ -223,18 +400,14 @@ class AppiumElementTreeBuilder:
 					is_visible = width > 0 and height > 0
 
 					# For mobile apps, viewport coordinates and page coordinates are the same
-					# since there's no scrolling offset like in web browsers
 					viewport_coordinates = CoordinateSet(x=x1, y=y1, width=width, height=height)
 					page_coordinates = CoordinateSet(x=x1, y=y1, width=width, height=height)
 
 					# Calculate if element is in expanded viewport
-					expanded_top = -viewport_expansion
-					expanded_bottom = screen_height + viewport_expansion
-					expanded_left = -viewport_expansion
-					expanded_right = screen_width + viewport_expansion
-					is_in_viewport = x2 > expanded_left and x1 < expanded_right and y2 > expanded_top and y1 < expanded_bottom
+					is_in_viewport = self._is_in_viewport(x1, y1, x2, y2, screen_width, screen_height, viewport_expansion)
 			except Exception as e:
 				logger.debug(f"Error parsing bounds '{bounds}': {e}")
+
 		elif screen_width and screen_height:
 			try:
 				# iOS format: separate x, y, width, height attributes
@@ -242,146 +415,80 @@ class AppiumElementTreeBuilder:
 				y = attributes.get('y')
 				width = attributes.get('width')
 				height = attributes.get('height')
-				
-				if x is not None and y is not None and width is not None and height is not None:
+
+				if all(coord is not None for coord in [x, y, width, height]):
 					x1, y1 = int(x), int(y)
 					w, h = int(width), int(height)
 					x2, y2 = x1 + w, y1 + h
-					
-					# For iOS, check both size and visible attribute
+
+					# Check visibility
 					is_visible = w > 0 and h > 0 and attributes.get('visible', 'true').lower() == 'true'
 
-					# For mobile apps, viewport coordinates and page coordinates are the same
 					viewport_coordinates = CoordinateSet(x=x1, y=y1, width=w, height=h)
 					page_coordinates = CoordinateSet(x=x1, y=y1, width=w, height=h)
 
-					# Calculate if element is in expanded viewport
-					expanded_top = -viewport_expansion
-					expanded_bottom = screen_height + viewport_expansion
-					expanded_left = -viewport_expansion
-					expanded_right = screen_width + viewport_expansion
-					is_in_viewport = x2 > expanded_left and x1 < expanded_right and y2 > expanded_top and y1 < expanded_bottom
+					is_in_viewport = self._is_in_viewport(x1, y1, x2, y2, screen_width, screen_height, viewport_expansion)
 			except Exception as e:
-				logger.debug(f"Error parsing iOS coordinates: {e}")
-		
-		# Final fallback: check iOS visible attribute even without coordinates
-		if platform_type.lower() == 'ios' and viewport_coordinates is None:
+				logger.debug(f'Error parsing iOS coordinates: {e}')
+
+		# Final fallback: check iOS visible attribute
+		if platform_type == 'ios' and viewport_coordinates is None:
 			is_visible = attributes.get('visible', 'true').lower() == 'true'
 
-		highlight_index = None
-		if is_interactive and is_visible and is_in_viewport:
-			highlight_index = self._highlight_index
-			self._selector_map[highlight_index] = None
-			self._highlight_index += 1
+		return viewport_coordinates, page_coordinates, is_visible, is_in_viewport
 
-		props = dict(attributes)
-		props['_is_visible'] = is_visible
-		props['_is_in_viewport'] = is_in_viewport
+	def _is_in_viewport(self, x1, y1, x2, y2, screen_width, screen_height, viewport_expansion):
+		"""Check if element is in expanded viewport"""
+		expanded_top = -viewport_expansion
+		expanded_bottom = screen_height + viewport_expansion
+		expanded_left = -viewport_expansion
+		expanded_right = screen_width + viewport_expansion
+		return x2 > expanded_left and x1 < expanded_right and y2 > expanded_top and y1 < expanded_bottom
 
-		node = AppElementNode(
-			tag_name=node_type,
-			is_interactive=is_interactive,
-			attributes=props,
-			parent=parent,
-			text=text,
-			key=key,
-			viewport_coordinates=viewport_coordinates,
-			page_coordinates=page_coordinates,
-			viewport_info=viewport_info,
-			is_in_viewport=is_in_viewport,
-			is_visible=is_visible,
-			highlight_index=highlight_index,
-		)
+	def _sort_nodes_by_position(self, nodes):
+		"""Sort nodes by position (top-to-bottom, left-to-right)"""
 
-		for child_element in element:
-			child_node = self._parse_element(
-				child_element,
-				node,
-				platform_type,
-				screen_width,
-				screen_height,
-				viewport_expansion,
-				debug_mode,
-				viewport_info,
-			)
-			if child_node:
-				node.add_child(child_node)
+		def sort_key(node):
+			if node.viewport_coordinates:
+				return (node.viewport_coordinates.y, node.viewport_coordinates.x)
+			return (0, 0)
 
-		if highlight_index is not None:
-			self._selector_map[highlight_index] = node
+		nodes.sort(key=sort_key)
 
-		return node
+	def _reassign_highlight_indices(self, sorted_nodes):
+		"""Reassign highlight indices after sorting"""
+		self._selector_map.clear()
+		for i, node in enumerate(sorted_nodes):
+			node.highlight_index = i
+			self._selector_map[i] = node
 
-	def _is_element_interactive(self, attributes, node_type, platform_type):
-		"""
-		Determine if an element is likely to be interactive based on its attributes and type
-
-		Args:
-		    attributes: Element attributes
-		    node_type: Element node type
-		    platform_type: The platform type (e.g., "android", "ios")
-
-		Returns:
-		    bool: True if the element is likely interactive, False otherwise
-		"""
-		if platform_type.lower() == 'android':
-			interactive_types = [
-				'android.widget.Button',
-				'android.widget.ImageButton',
-				'android.widget.EditText',
-				'android.widget.CheckBox',
-				'android.widget.RadioButton',
-				'android.widget.Switch',
-				'android.widget.Spinner',
-				'android.widget.SeekBar',
+	def _calculate_scroll_info(self, app_state, all_nodes):
+		"""Calculate viewport scroll information"""
+		try:
+			# Gather page-coordinate bounds of all nodes and visible nodes
+			all_coords = [
+				(node.page_coordinates.y, node.page_coordinates.y + node.page_coordinates.height)
+				for node in all_nodes
+				if getattr(node, 'page_coordinates', None)
+			]
+			visible_coords = [
+				(node.page_coordinates.y, node.page_coordinates.y + node.page_coordinates.height)
+				for node in all_nodes
+				if getattr(node, 'page_coordinates', None) and node.is_in_viewport
 			]
 
-			# Primary check: clickable attribute
-			if attributes.get('clickable', 'false').lower() == 'true':
-				return True
+			if all_coords and visible_coords:
+				total_top = min(y1 for y1, _ in all_coords)
+				total_bottom = max(y2 for _, y2 in all_coords)
+				visible_top = min(y1 for y1, _ in visible_coords)
+				visible_bottom = max(y2 for _, y2 in visible_coords)
 
-			# Secondary check: has click listener
-			if attributes.get('has-click-listener', 'false').lower() == 'true':
-				return True
-
-			# Check for known interactive widget types
-			if any(interactive_type in node_type for interactive_type in interactive_types):
-				return True
-
-			# Check for ViewGroup containers that are focusable and enabled (common for custom buttons)
-			if (
-				node_type == 'android.view.ViewGroup'
-				and attributes.get('focusable', 'false').lower() == 'true'
-				and attributes.get('enabled', 'false').lower() == 'true'
-			):
-				return True
-
-		elif platform_type.lower() == 'ios':
-			interactive_types = [
-				'XCUIElementTypeButton',
-				'XCUIElementTypeTextField',
-				'XCUIElementTypeSecureTextField',
-				'XCUIElementTypeSwitch',
-				'XCUIElementTypeSlider',
-				'XCUIElementTypeCell',
-				'XCUIElementTypeLink',
-				'XCUIElementTypeSearchField',
-				'XCUIElementTypeKey',
-			]
-
-			# Check if element is enabled first
-			is_enabled = attributes.get('enabled', 'false').lower() == 'true'
-
-			if is_enabled:
-				# Known interactive types
-				if node_type in interactive_types:
-					return True
-
-				# XCUIElementTypeOther can be interactive if it's accessible
-				if node_type == 'XCUIElementTypeOther' and attributes.get('accessible', 'false').lower() == 'true':
-					return True
-
-		return False
+				# Pixels scrolled above the current viewport
+				app_state.pixels_above = max(0, int(visible_top - total_top))
+				# Pixels remaining to scroll below the current viewport
+				app_state.pixels_below = max(0, int(total_bottom - visible_bottom))
+		except Exception as e:
+			logger.debug(f'Failed to compute scroll pixels: {e}')
 
 	def _collect_all_nodes(self, root_node):
 		"""
@@ -451,10 +558,10 @@ class AppiumElementTreeBuilder:
 
 			# Convert PIL Image to OpenCV format (RGB to BGR)
 			screenshot_cv = cv2.cvtColor(np.array(screenshot_image), cv2.COLOR_RGB2BGR)
-			
+
 			# Get actual screenshot dimensions
 			screenshot_height, screenshot_width = screenshot_cv.shape[:2]
-			
+
 			# Get reported screen dimensions from driver
 			try:
 				driver_size = self.driver.get_window_size()
@@ -464,11 +571,11 @@ class AppiumElementTreeBuilder:
 				logger.warning('Could not get driver window size, using screenshot dimensions')
 				driver_width = screenshot_width
 				driver_height = screenshot_height
-			
+
 			# Calculate scaling factors to handle device pixel ratio differences
 			scale_x = screenshot_width / driver_width if driver_width > 0 else 1.0
 			scale_y = screenshot_height / driver_height if driver_height > 0 else 1.0
-			
+
 			logger.debug(f'Screenshot dimensions: {screenshot_width}x{screenshot_height}')
 			logger.debug(f'Driver window size: {driver_width}x{driver_height}')
 			logger.debug(f'Scaling factors: x={scale_x:.2f}, y={scale_y:.2f}')
@@ -487,7 +594,7 @@ class AppiumElementTreeBuilder:
 					y = int(node.viewport_coordinates.y * scale_y)
 					width = int(node.viewport_coordinates.width * scale_x)
 					height = int(node.viewport_coordinates.height * scale_y)
-					
+
 					# Ensure coordinates are within screenshot bounds
 					x = max(0, min(x, screenshot_width - 1))
 					y = max(0, min(y, screenshot_height - 1))
@@ -503,10 +610,8 @@ class AppiumElementTreeBuilder:
 						2,
 					)
 
-					# Add highlight index label - just the number
+					# Add highlight index label
 					label = f'{highlight_index}'
-
-					# Use appropriate font size for the highlight index
 					font_scale = 1.0
 					font_thickness = 2
 
@@ -515,7 +620,7 @@ class AppiumElementTreeBuilder:
 						label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
 					)
 
-					# Position on the right side with small offset from the right edge (using scaled coordinates)
+					# Position label
 					label_x = max(0, min(x2 - label_width - 5, screenshot_width - label_width))
 					label_y = max(label_height, min(y + label_height + 5, screenshot_height))
 
@@ -556,5 +661,4 @@ class AppiumElementTreeBuilder:
 
 		except Exception as e:
 			logger.error(f'Error drawing bounding boxes on screenshot: {str(e)}')
-			return ''
 			return ''

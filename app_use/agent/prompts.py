@@ -174,9 +174,7 @@ class AgentMessagePrompt:
 		"""Return a `HumanMessage` describing *app_state* with viewport context."""
 
 		# List interactive elements in the current viewport
-		elements_text = self.app_state.element_tree.interactive_elements_to_string(
-			include_attributes=self.include_attributes
-		)
+		elements_text = self.app_state.element_tree.interactive_elements_to_string(include_attributes=self.include_attributes)
 
 		has_content_above = (self.app_state.pixels_above or 0) > 0
 		has_content_below = (self.app_state.pixels_below or 0) > 0
@@ -184,63 +182,54 @@ class AgentMessagePrompt:
 		if elements_text:
 			if has_content_above:
 				elements_text = (
-					f"... {self.app_state.pixels_above} pixels above - scroll or extract content to see more ...\n"
-					f"{elements_text}"
+					f'... {self.app_state.pixels_above} pixels above - scroll or extract content to see more ...\n{elements_text}'
 				)
 			else:
-				elements_text = f"[Start of page]\n{elements_text}"
+				elements_text = f'[Start of page]\n{elements_text}'
 
 			if has_content_below:
 				elements_text = (
-					f"{elements_text}\n... {self.app_state.pixels_below} pixels below - scroll or extract content to see more ..."
+					f'{elements_text}\n... {self.app_state.pixels_below} pixels below - scroll or extract content to see more ...'
 				)
 			else:
-				elements_text = f"{elements_text}\n[End of page]"
+				elements_text = f'{elements_text}\n[End of page]'
 		else:
-			elements_text = "empty page"
+			elements_text = 'empty page'
 
 		# Compose step/time information
 		if self.step_info:
-			step_info_description = (
-				f"Current step: {self.step_info.step_number + 1}/{self.step_info.max_steps}"
-			)
+			step_info_description = f'Current step: {self.step_info.step_number + 1}/{self.step_info.max_steps}'
 		else:
-			step_info_description = ""
-		time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-		step_info_description += f"\nCurrent date and time: {time_str}"
+			step_info_description = ''
+		time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+		step_info_description += f'\nCurrent date and time: {time_str}'
 
 		# Final state description
 		state_description = (
-			"[Task history memory ends]\n"
-			"[Current state starts here]\n"
-			"Interactive elements from top layer of the current page inside the viewport:\n"
-			f"{elements_text}\n"
-			f"{step_info_description}\n"
+			'[Task history memory ends]\n'
+			'[Current state starts here]\n'
+			'Interactive elements from top layer of the current page inside the viewport:\n'
+			f'{elements_text}\n'
+			f'{step_info_description}\n'
 		)
 
 		# Append previous action results
 		if self.result:
 			for i, result in enumerate(self.result):
 				if result.extracted_content:
-					state_description += (
-						f"\nAction result {i + 1}/{len(self.result)}: {result.extracted_content}"
-					)
+					state_description += f'\nAction result {i + 1}/{len(self.result)}: {result.extracted_content}'
 				if result.error:
-					error = result.error.split("\n")[-1]
-					state_description += (
-						f"\nAction error {i + 1}/{len(self.result)}: ...{error}"
-					)
+					error = result.error.split('\n')[-1]
+					state_description += f'\nAction error {i + 1}/{len(self.result)}: ...{error}'
 
 		# Multi-modal message (text + screenshot) for vision models
-		if use_vision and getattr(self.app_state, "screenshot", None):
+		if use_vision and getattr(self.app_state, 'screenshot', None):
 			return HumanMessage(
 				content=[
-					{"type": "text", "text": state_description},
+					{'type': 'text', 'text': state_description},
 					{
-						"type": "image_url",
-						"image_url": {
-							"url": f"data:image/png;base64,{self.app_state.screenshot}"
-						},
+						'type': 'image_url',
+						'image_url': {'url': f'data:image/png;base64,{self.app_state.screenshot}'},
 					},
 				]
 			)

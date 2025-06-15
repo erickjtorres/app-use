@@ -7,4 +7,4 @@ including interactive setup, GUI, and utility commands.
 
 from .cli import main
 
-__all__ = ['main'] 
+__all__ = ['main']

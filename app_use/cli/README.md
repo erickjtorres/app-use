@@ -24,15 +24,6 @@ This module contains the command-line interface for app-use
 
 ## Usage Examples
 
-### Interactive Setup
-```bash
-# Full interactive setup wizard
-app-use start
-
-# Setup with debug logging
-app-use start --debug
-```
-
 ### Environment Management
 ```bash
 # Install dependencies
@@ -40,6 +31,15 @@ app-use setup
 
 # Check environment health
 app-use doctor
+```
+
+### Interactive Setup
+```bash
+# Full interactive setup wizard
+app-use start
+
+# Setup with debug logging
+app-use start --debug
 ```
 
 ### Direct Launch

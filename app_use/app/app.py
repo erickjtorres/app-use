@@ -17,7 +17,6 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.actions.action_builder import ActionBuilder
 from selenium.webdriver.common.actions.pointer_input import PointerInput
-from selenium.webdriver.common.actions import interaction
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -115,12 +114,12 @@ class App:
 					desired_caps['bundleId'] = self.bundle_id
 				desired_caps['automationName'] = 'XCUITest'
 				desired_caps['autoAcceptAlerts'] = True
-				
+
 				# Add iOS specific capabilities for better simulator handling
 				desired_caps['newCommandTimeout'] = 60
 				desired_caps['wdaLaunchTimeout'] = 60000
 				desired_caps['wdaConnectionTimeout'] = 60000
-				
+
 				# For simulators, explicitly set platformVersion and deviceName to avoid confusion
 				if self.device_name and len(self.device_name) > 20:  # Likely a UDID
 					desired_caps['udid'] = self.device_name
@@ -132,12 +131,12 @@ class App:
 			desired_caps.update(self.additional_capabilities)
 
 			logger.info(f'Initializing Appium driver with capabilities: {desired_caps}')
-			
+
 			if self.platform_name.lower() == 'android':
 				options = UiAutomator2Options().load_capabilities(desired_caps)
 			else:
 				options = XCUITestOptions().load_capabilities(desired_caps)
-			
+
 			logger.info('Connecting to Appium server...')
 			self.driver = webdriver.Remote(self.appium_server_url, options=options)
 			self.driver.implicitly_wait(self.timeout)
@@ -156,19 +155,19 @@ class App:
 				error_msg += '\n   2. Try selecting a different simulator'
 				error_msg += '\n   3. Restart the simulator and try again'
 				error_msg += f'\n   4. Device UDID being used: {self.device_name}'
-			
+
 			logger.error(error_msg)
 			raise
 
 	def _wait_for_page_and_frames_load(self, wait_time: float = 2.0) -> bool:
 		"""
 		Wait for the app UI to stabilize after potential page transitions.
-		
+
 		Simple approach: just wait a few seconds to allow transitions to complete.
-		
+
 		Args:
 		    wait_time: Time to wait in seconds (default: 2.0)
-		    
+
 		Returns:
 		    bool: Always returns True after waiting
 		"""
@@ -176,8 +175,8 @@ class App:
 		time.sleep(wait_time)
 		logger.debug('Wait completed')
 		return True
-	
-	@time_execution_sync('--get_state_summary') 
+
+	@time_execution_sync('--get_state_summary')
 	def get_app_state(
 		self,
 		viewport_expansion: int = 0,
@@ -186,18 +185,18 @@ class App:
 	) -> AppState:
 		"""
 		Get the current app state, optionally waiting for UI stability first.
-		
+
 		Args:
 		    viewport_expansion: Expand viewport bounds by this many pixels
 		    debug_mode: Enable debug mode for tree building
 		    include_highlights: Whether to include highlight indices
 		    wait_for_stability: Whether to wait for UI stability before capturing state
-		    
+
 		Returns:
 		    AppState: Current application state
 		"""
 		self._wait_for_page_and_frames_load()
-		
+
 		app_state = self.element_tree_builder.build_element_tree(
 			self.platform_name.lower(),
 			viewport_expansion=viewport_expansion,
@@ -214,7 +213,6 @@ class App:
 			return self._cached_state.selector_map
 		state = self.get_app_state(viewport_expansion=viewport_expansion, debug_mode=debug_mode)
 		return state.selector_map
-
 
 	def enter_text_with_highlight_index(self, highlight_index: int, text: str) -> bool:
 		selector_map = self.get_selector_map()
@@ -266,18 +264,22 @@ class App:
 				logger.error(f'Error entering text by key: {str(e)}')
 
 		# Priority 3: Try by element type and other attributes for iOS text fields
-		if self.platform_name.lower() == 'ios' and target_node.tag_name in ['XCUIElementTypeSearchField', 'XCUIElementTypeTextField', 'XCUIElementTypeSecureTextField']:
+		if self.platform_name.lower() == 'ios' and target_node.tag_name in [
+			'XCUIElementTypeSearchField',
+			'XCUIElementTypeTextField',
+			'XCUIElementTypeSecureTextField',
+		]:
 			try:
 				logger.info(f'Trying to find iOS text field by type: {target_node.tag_name}')
 				# Try to find by element type and any available attribute
 				xpath_parts = [f'name()="{target_node.tag_name}"']
-				
+
 				if target_node.key:
 					xpath_parts.append(f'(@name="{target_node.key}" or @accessibilityIdentifier="{target_node.key}")')
-				
+
 				if target_node.text:
 					xpath_parts.append(f'(@value="{target_node.text}" or @label="{target_node.text}")')
-				
+
 				# If we have coordinates, try to find elements near them
 				if target_node.viewport_coordinates:
 					# Build a more flexible xpath
@@ -286,7 +288,7 @@ class App:
 						xpath += f'[{" and ".join(xpath_parts[1:])}]'
 				else:
 					xpath = f'//*[{" and ".join(xpath_parts)}]'
-				
+
 				logger.info(f'Using xpath: {xpath}')
 				element = self.driver.find_element(AppiumBy.XPATH, xpath)
 				element.clear()
@@ -322,11 +324,11 @@ class App:
 			try:
 				logger.info('Trying final fallback: click coordinates and send to focused element')
 				center_x, center_y = self.get_element_center_coordinates(target_node)
-				
+
 				# Click to focus the element
 				if self.click_coordinates(center_x, center_y):
 					time.sleep(0.5)  # Wait for focus
-					
+
 					# Try to get the currently focused element and send text to it
 					try:
 						focused_element = self.driver.switch_to.active_element
@@ -337,14 +339,14 @@ class App:
 							return True
 					except Exception as focus_error:
 						logger.warning(f'Focused element method failed: {focus_error}')
-						
+
 					# If focused element doesn't work, try sending keys to the app
 					if self.platform_name.lower() == 'ios':
 						logger.info('Trying to send keys directly to iOS app')
 						self.driver.execute_script('mobile: keys', {'keys': [{'text': text}]})
 						logger.info('Successfully sent text using direct keys')
 						return True
-						
+
 			except Exception as e:
 				logger.error(f'Error with final fallback method: {str(e)}')
 
@@ -393,7 +395,6 @@ class App:
 				return True
 			except Exception as e:
 				logger.error(f'Error clicking by key: {str(e)}')
-
 
 		# Priority 3: Try by text content
 		if target_node.text:
@@ -821,7 +822,7 @@ class App:
 			# Clear any existing text - use more efficient methods
 			try:
 				logger.debug('Attempting to clear existing text')
-				
+
 				if self.platform_name.lower() == 'android':
 					# For Android, try to use active element clear first
 					try:
@@ -837,7 +838,7 @@ class App:
 				else:
 					# For iOS, try more efficient clearing methods
 					cleared = False
-					
+
 					# Method 1: Try to use active element clear (most efficient)
 					try:
 						active_element = self.driver.switch_to.active_element
@@ -847,7 +848,7 @@ class App:
 							cleared = True
 					except Exception as clear_error:
 						logger.debug(f'Active element clear failed: {clear_error}')
-					
+
 					# Method 2: If element clear failed, try select all + delete
 					if not cleared:
 						try:
@@ -859,7 +860,7 @@ class App:
 							cleared = True
 						except Exception as select_error:
 							logger.debug(f'Select all method failed: {select_error}')
-					
+
 					# Method 3: Fallback to multiple deletes only if other methods failed
 					if not cleared:
 						try:
@@ -886,7 +887,7 @@ class App:
 						active_element.send_keys(text)
 						logger.info('Successfully used active element send_keys')
 					else:
-						raise Exception("No active element found")
+						raise Exception('No active element found')
 				except Exception as fallback_error:
 					logger.warning(f'Active element method failed: {fallback_error}, trying mobile type')
 					try:
@@ -914,9 +915,7 @@ class App:
 							logger.warning(f'Character-by-character failed: {char_error}, using W3C actions as final fallback')
 							# Method 4: Use W3C Actions to type character by character
 							from selenium.webdriver.common.actions.action_builder import ActionBuilder
-							from selenium.webdriver.common.actions.pointer_input import PointerInput
-							from selenium.webdriver.common.actions import interaction
-							
+
 							actions = ActionBuilder(self.driver)
 							for char in text:
 								actions.key_action.key_down(char)
@@ -1130,7 +1129,7 @@ class App:
 
 					for line in lines:
 						line = line.strip()
-						
+
 						# Check if we're entering an Activity section
 						if 'Activity #' in line and 'filter' in line:
 							# Reset flags for new activity
@@ -1144,7 +1143,7 @@ class App:
 								if current_activity.startswith('.'):
 									current_activity = package_name + current_activity
 								logger.debug(f'Found activity: {current_activity}')
-						
+
 						elif in_activity_section:
 							if 'android.intent.action.MAIN' in line:
 								has_main_action = True
@@ -1196,7 +1195,7 @@ class App:
 				if result.returncode == 0:
 					# Look in both stdout and stderr for the activity information
 					full_output = result.stdout + '\n' + result.stderr
-					
+
 					# Look for "Starting: Intent" pattern
 					intent_match = re.search(r'Starting: Intent \{[^}]*cmp=([^/]+)/([^}\s]+)', full_output)
 					if intent_match:
@@ -1213,14 +1212,14 @@ class App:
 			# Method 4: Try launching the app with intent and check what starts
 			try:
 				logger.info('Method 4: Launch with intent and check running activity')
-				
+
 				# Launch the app using intent
 				intent_command = f'adb {device_flag} shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n {package_name}/'
 				subprocess.run(intent_command, shell=True, capture_output=True, timeout=5)
-				
+
 				# Wait a moment for the app to start
 				time.sleep(2)
-				
+
 				# Check what activity is currently running
 				check_command = f"adb {device_flag} shell dumpsys activity activities | grep -E 'mResumedActivity.*{package_name}|mFocusedActivity.*{package_name}'"
 				result = subprocess.run(check_command, shell=True, capture_output=True, text=True, timeout=5)
@@ -1257,7 +1256,7 @@ class App:
 			# Final fallback: Try common activity naming patterns
 			common_patterns = [
 				f'{package_name}.MainActivity',
-				f'{package_name}.main.MainActivity', 
+				f'{package_name}.main.MainActivity',
 				f'{package_name}.ui.MainActivity',
 				f'{package_name}.activities.MainActivity',
 				f'{package_name}.activity.MainActivity',
@@ -1309,12 +1308,12 @@ class App:
 				start_x = center_x
 				start_y = center_y + (amount // 2)  # Start from lower position
 				end_x = center_x
-				end_y = center_y - (amount // 2)    # End at higher position (swipe up)
+				end_y = center_y - (amount // 2)  # End at higher position (swipe up)
 			else:  # direction == "up"
 				start_x = center_x
 				start_y = center_y - (amount // 2)  # Start from higher position
 				end_x = center_x
-				end_y = center_y + (amount // 2)    # End at lower position (swipe down)
+				end_y = center_y + (amount // 2)  # End at lower position (swipe down)
 
 			# Ensure coordinates are within screen bounds
 			start_y = max(0, min(start_y, size['height']))
@@ -1346,7 +1345,7 @@ class App:
 		    bool: True if keys were sent successfully
 
 		Supported mobile keys:
-		    Android: Enter, Back, Home, Menu, Search, Delete, Space, Tab, 
+		    Android: Enter, Back, Home, Menu, Search, Delete, Space, Tab,
 		             VolumeUp, VolumeDown, Power, Camera, Call, EndCall
 		    iOS: Home, VolumeUp, VolumeDown, Lock (Power button), Siri
 		"""
@@ -1356,7 +1355,3 @@ class App:
 		except Exception as e:
 			logger.error(f'Error sending keys "{keys}": {str(e)}')
 			return False
-
-
-
-

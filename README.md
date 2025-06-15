@@ -30,6 +30,17 @@ pip install "app-use[memory]"
 
 Install the necessary drivers and software: Check out our [environment setup](https://github.com/erickjtorres/app-use/blob/main/docs/env-setup.md) docs for more info!
 
+Or feel free to try out our cli for a seamless setup:
+```bash
+pip install "app-use[cli]"
+
+#install dependencies
+app-use setup
+
+# to check dependencies where installed correctly
+app-use doctor
+```
+
 Define the app and mobile device you want to target:
 
 ```python

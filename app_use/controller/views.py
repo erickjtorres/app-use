@@ -98,6 +98,7 @@ class ScrollAction(BaseModel):
 
 	amount: int | None = None  # The number of pixels to scroll. If None, scroll one page
 
+
 class GetAppStateAction(BaseModel):
 	"""Action model for getting the current application state"""
 

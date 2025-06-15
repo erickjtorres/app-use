@@ -119,7 +119,6 @@ class Controller(Generic[Context]):
 		)
 		async def click_element(params: ClickElementAction, app: App) -> ActionResult:
 			try:
-
 				success = app.click_element_by_highlight_index(params.index)  # index represents highlight_index
 
 				if success:
@@ -287,7 +286,9 @@ class Controller(Generic[Context]):
 						'is_interactive': getattr(node, 'is_interactive', False) if hasattr(node, 'is_interactive') else False,
 						'text': node.text if hasattr(node, 'text') else None,
 						'key': getattr(node, 'key', None) if hasattr(node, 'key') else None,
-						'parent_highlight_index': node.parent.highlight_index if node.parent and hasattr(node.parent, 'highlight_index') else None,
+						'parent_highlight_index': node.parent.highlight_index
+						if node.parent and hasattr(node.parent, 'highlight_index')
+						else None,
 					}
 					node_info.append(info)
 

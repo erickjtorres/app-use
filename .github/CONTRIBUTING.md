@@ -22,6 +22,7 @@ appium   # runs on :4723 by default
 ```
 
 For a deeper dive into device & driver setup, see `docs/env-setup.md`.
+Or use our CLI tool `app-use setup`
 
 ---
 
