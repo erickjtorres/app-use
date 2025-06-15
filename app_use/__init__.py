@@ -1,32 +1,25 @@
-from app_use.agent import (
-    ActionResult,
-    Agent,
-    AgentBrain,
-    AgentError,
-    AgentHistory,
-    AgentHistoryList,
-    AgentOutput,
-    AgentSettings,
-    AgentState,
-)
-from app_use.agent.prompts import SystemPrompt
-from app_use.app.app import App
-from app_use.controller.service import Controller
-from app_use.controller.views import ActionModel
+"""
+App-Use: AI-Powered Mobile App Automation
 
-# Avoid name collision; ensure ActionResult refers to the agent's ActionResult by default
+Control mobile applications using AI agents through Appium.
+Support for iOS and Android apps with natural language instructions.
+"""
+
+__version__ = "0.1.0"
+
+# Import main components
+from .app.app import App
+from .agent.service import Agent
+from .controller.service import Controller
+
+# Import CLI main function
+from .cli.cli import main as cli_main
+
+# Export main components
 __all__ = [
-    'Agent',
-    'AgentSettings',
-    'AgentState',
-    'AgentOutput',
-    'AgentHistory',
-    'AgentHistoryList',
-    'ActionResult',
-    'AgentBrain',
-    'AgentError',
     'App',
+    'Agent', 
     'Controller',
-    'SystemPrompt',
-    'ActionModel',
+    'cli_main',
+    '__version__'
 ]
