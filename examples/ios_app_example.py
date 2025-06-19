@@ -25,19 +25,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main():
-	cap_kwargs = {
-		'udid': 'udid'  # Hardware UDID for physical device
-	}
 
 	llm = ChatGoogleGenerativeAI(model='gemini-2.5-flash-preview-05-20')
-
 
 	app = App(
 		platform_name='ios',
 		device_name='Erickiphone',
 		bundle_id='com.atebits.Tweetie2',
 		appium_server_url='http://localhost:4723',
-		**cap_kwargs,
 	)
 
 	agent = Agent(

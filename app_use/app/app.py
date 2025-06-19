@@ -40,7 +40,8 @@ class App:
 		app_package=None,
 		app_activity=None,
 		bundle_id=None,
-		app_path=None,
+		app=None,
+		udid=None,
 		appium_server_url='http://localhost:4723/wd/hub',
 		timeout=30,
 		**capabilities,
@@ -50,7 +51,8 @@ class App:
 		self.app_package = app_package
 		self.app_activity = app_activity
 		self.bundle_id = bundle_id
-		self.app_path = app_path
+		self.app = app
+		self.udid = None
 		self.appium_server_url = appium_server_url
 		self.timeout = timeout
 		self.additional_capabilities = capabilities
@@ -61,11 +63,11 @@ class App:
 		self._cached_state = None
 
 		if platform_name.lower() == 'android':
-			if not device_name:
-				raise ValueError('device_name is required for Android')
-			if not app_path:
+			if not device_name and not udid:
+				raise ValueError('device_name or udid is required for Android')
+			if not app:
 				if not app_package:
-					raise ValueError('app_package is required for Android when not using app_path')
+					raise ValueError('app_package is required for Android when not using app')
 				# Auto-detect app_activity if not provided
 				if not app_activity:
 					logger.info(f'Auto-detecting main activity for package: {app_package}')
@@ -78,10 +80,10 @@ class App:
 							f'Could not auto-detect app_activity for {app_package}. Please provide app_activity manually.'
 						)
 		elif platform_name.lower() == 'ios':
-			if not device_name:
-				raise ValueError('device_name is required for iOS')
-			if not bundle_id and not app_path:
-				raise ValueError('Either bundle_id or app_path is required for iOS')
+			if not device_name and not udid:
+				raise ValueError('device_name or udid is required for iOS')
+			if not bundle_id and not app:
+				raise ValueError('Either bundle_id or app is required for iOS')
 		else:
 			raise ValueError("platform_name must be 'Android' or 'iOS'")
 
@@ -98,18 +100,20 @@ class App:
 
 			if self.device_name:
 				desired_caps['deviceName'] = self.device_name
+			if self.udid:
+				desired_caps['udid'] = self.udid
 
 			if self.platform_name.lower() == 'android':
-				if self.app_path:
-					desired_caps['app'] = os.path.abspath(self.app_path)
+				if self.app:
+					desired_caps['app'] = self.app
 				else:
 					desired_caps['appPackage'] = self.app_package
 					desired_caps['appActivity'] = self.app_activity
 				desired_caps['automationName'] = 'UiAutomator2'
 				desired_caps['autoGrantPermissions'] = True
 			elif self.platform_name.lower() == 'ios':
-				if self.app_path:
-					desired_caps['app'] = os.path.abspath(self.app_path)
+				if self.app:
+					desired_caps['app'] = self.app
 				else:
 					desired_caps['bundleId'] = self.bundle_id
 				desired_caps['automationName'] = 'XCUITest'
@@ -119,14 +123,6 @@ class App:
 				desired_caps['newCommandTimeout'] = 60
 				desired_caps['wdaLaunchTimeout'] = 60000
 				desired_caps['wdaConnectionTimeout'] = 60000
-
-				# For simulators, explicitly set platformVersion and deviceName to avoid confusion
-				if self.device_name and len(self.device_name) > 20:  # Likely a UDID
-					desired_caps['udid'] = self.device_name
-					logger.info(f'Connecting to iOS device/simulator with UDID: {self.device_name[:8]}...')
-				else:
-					# If it's a short name, treat it as deviceName
-					logger.info(f'Connecting to iOS device/simulator: {self.device_name}')
 
 			desired_caps.update(self.additional_capabilities)
 

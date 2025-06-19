@@ -49,7 +49,6 @@ Define the app and mobile device you want to target:
         device_name='Your Device Name',
         bundle_id="com.apple.calculator",
         appium_server_url='http://localhost:4723',
-        {"udid": 'device-id'},
     )
 ```
 

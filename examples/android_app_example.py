@@ -32,31 +32,23 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main():
-	# Android device capabilities for your specific device
 	cap_kwargs = {
-		'udid': 'your-android-device-udid',  # Your Android device UDID
-		# Uncomment and set the following if needed:
-		# "platformVersion": "13",  # Your Android version
-		# "automationName": "UiAutomator2",  # Already set in App class
-		# "autoGrantPermissions": True,  # Already set in App class
-		'noReset': True,  # Don't reset app state between sessions
-		# "fullReset": False,  # Don't uninstall app between sessions
+		'noReset': True,
 	}
 
 	llm = ChatGoogleGenerativeAI(model='gemini-2.5-flash-preview-05-20')
 
 	app = App(
 		platform_name='Android',
-		device_name='device-name',  # Your device name
-		app_package='com.google.android.youtube',  # YouTube package you found
-		# app_activity is now automatically detected! No need to specify it manually (but you can if needed)
+		udid='emulator-5554',
+		app_package='org.wikipedia',
 		appium_server_url='http://localhost:4723',
 		timeout=30,
 		**cap_kwargs,
 	)
 
 	agent = Agent(
-		task="Can you play the GTA 5 trailer",
+		task='Can you search for a article on Wikipedia?',
 		llm=llm,
 		app=app,
 		generate_gif=True,  # Enable GIF generation for actions

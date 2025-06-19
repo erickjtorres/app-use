@@ -53,7 +53,7 @@ def run_doctor_command() -> None:
 			if solution:
 				print(f'    💡 {solution}')
 
-		print('\n💬 Need help? Join our Discord: https://discord.gg/2cez4s85')
+		print('\n💬 Need help? Join our Discord: https://discord.gg/V9mW8UJ6tx')
 	else:
 		print('✅ No issues found! Your app-use environment is ready.')
 		print("🚀 Run 'app-use start' to begin using app-use.")

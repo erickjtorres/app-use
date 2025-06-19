@@ -69,10 +69,10 @@ cli = [
 ]
 
 [project.urls]
-Repository = "https://github.com/app-use/app-use"
-Homepage = "https://github.com/app-use/app-use"
-"Bug Tracker" = "https://github.com/app-use/app-use/issues"
-Documentation = "https://github.com/app-use/app-use#readme"
+Repository = "https://github.com/erickjtorres/app-use"
+Homepage = "https://github.com/erickjtorres/app-use"
+"Bug Tracker" = "https://github.com/erickjtorres/app-use/issues"
+Documentation = "https://github.com/erickjtorres/app-use#readme"
 
 [project.scripts]
 appuse = "app_use.cli:main"
