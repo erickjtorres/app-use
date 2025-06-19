@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "app-use"
 description = "Make mobile apps accessible for AI agents"
 authors = [{ name = "Erick Torres-Moreno" }]
-version = "0.0.2"
+version = "0.0.3"
 readme = "README.md"
 requires-python = ">=3.11,<4.0"
 classifiers = [

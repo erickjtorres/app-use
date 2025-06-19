@@ -5,7 +5,7 @@ Control mobile applications using AI agents through Appium.
 Support for iOS and Android apps with natural language instructions.
 """
 
-__version__ = '0.1.0'
+__version__ = '0.0.3'
 
 # Import main components
 from .agent.service import Agent
