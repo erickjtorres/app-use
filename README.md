@@ -4,10 +4,11 @@
 
 <h1 align="center">Enable AI to control your mobile apps 🤖</h1>
 
-
+[![PyPI Downloads](https://static.pepy.tech/badge/app-use)](https://pepy.tech/projects/app-use)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/erickjtorres/app-use)
 [![Twitter Follow](https://img.shields.io/twitter/follow/Erick?style=social)](https://x.com/itsericktorres)
 [![Discord](https://img.shields.io/discord/1381129368847384597?color=7289DA&label=Discord&logo=discord&logoColor=white)](https://discord.gg/V9mW8UJ6tx)
+
 
 
 📱 App Use is the easiest way to connect AI agents with mobile applications.
