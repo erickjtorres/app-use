@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 if TYPE_CHECKING:  # pragma: no cover
 	# These are only for type-checking / IDE auto-completion – avoid cyclic deps
-	from app_use.agent.views import ActionResult, AgentStepInfo
+	from app_use.agent.views import AgentStepInfo
 	from app_use.nodes.app_node import AppState
 
 
@@ -24,11 +24,12 @@ class SystemPrompt:
 	"""
 
 	DEFAULT_TEMPLATE = (
-		'You are an AI assistant that helps users interact with native mobile '
-		'applications through Appium. You can perform taps, swipes, text entry, '
-		'and other high-level actions. Always think step-by-step, reference '
+		'You are an AI assistant that helps users interact with mobile '
+		'applications through automation. You can perform taps, swipes, text entry, '
+		'and other high-level actions on mobile apps. Always think step-by-step, reference '
 		'interactive elements by their *index* as provided, and only use the '
-		'available actions.'
+		'available actions. When working with mobile apps, be aware of common '
+		'mobile UI patterns like navigation drawers, tab bars, and gesture-based interactions.'
 		'\n\n'  # newline so the caller can append the dynamic action list
 		'Your AVAILABLE ACTIONS:\n{actions}\n'
 		'# End of system instructions'
@@ -158,21 +159,26 @@ class AgentMessagePrompt:
 	def __init__(
 		self,
 		app_state: AppState,
-		result: list['ActionResult'] | None = None,
+		agent_history_description: str | None = None,
+		read_state_description: str | None = None,
+		task: str | None = None,
 		include_attributes: list[str] | None = None,
 		step_info: Optional['AgentStepInfo'] = None,
+		sensitive_data: str | None = None,
 	) -> None:
 		self.app_state = app_state
-		self.result = result
+		self.agent_history_description = agent_history_description
+		self.read_state_description = read_state_description
+		self.task = task
 		self.include_attributes = include_attributes or []
 		self.step_info = step_info
+		self.sensitive_data = sensitive_data
 
 	# ------------------------------------------------------------------
 	# Public helpers
 	# ------------------------------------------------------------------
-	def get_user_message(self, use_vision: bool = True) -> HumanMessage:
-		"""Return a `HumanMessage` describing *app_state* with viewport context."""
-
+	def _get_app_state_description(self) -> str:
+		"""Get description of the current app state"""
 		# List interactive elements in the current viewport
 		elements_text = self.app_state.element_tree.interactive_elements_to_string(include_attributes=self.include_attributes)
 
@@ -196,31 +202,46 @@ class AgentMessagePrompt:
 		else:
 			elements_text = 'empty page'
 
-		# Compose step/time information
+		return f'Interactive elements from top layer of the current page inside the viewport:\n{elements_text}'
+
+	def _get_agent_state_description(self) -> str:
+		"""Get description of current agent state and context"""
 		if self.step_info:
-			step_info_description = f'Current step: {self.step_info.step_number + 1}/{self.step_info.max_steps}'
+			step_info_description = f'Step {self.step_info.step_number + 1} of {self.step_info.max_steps} max possible steps\n'
 		else:
 			step_info_description = ''
+		
 		time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
-		step_info_description += f'\nCurrent date and time: {time_str}'
+		step_info_description += f'Current date and time: {time_str}'
 
-		# Final state description
+		agent_state = f"""
+<user_request>
+{self.task}
+</user_request>
+<step_info>
+{step_info_description}
+</step_info>
+"""
+		if self.sensitive_data:
+			agent_state += f'<sensitive_data>\n{self.sensitive_data}\n</sensitive_data>\n'
+
+		return agent_state.strip()
+
+	def get_user_message(self, use_vision: bool = True) -> HumanMessage:
+		"""Return a `HumanMessage` describing *app_state* with viewport context."""
+
 		state_description = (
-			'[Task history memory ends]\n'
-			'[Current state starts here]\n'
-			'Interactive elements from top layer of the current page inside the viewport:\n'
-			f'{elements_text}\n'
-			f'{step_info_description}\n'
+			'<agent_history>\n'
+			+ (self.agent_history_description.strip('\n') if self.agent_history_description else '')
+			+ '\n</agent_history>\n'
 		)
-
-		# Append previous action results
-		if self.result:
-			for i, result in enumerate(self.result):
-				if result.extracted_content:
-					state_description += f'\nAction result {i + 1}/{len(self.result)}: {result.extracted_content}'
-				if result.error:
-					error = result.error.split('\n')[-1]
-					state_description += f'\nAction error {i + 1}/{len(self.result)}: ...{error}'
+		state_description += '<agent_state>\n' + self._get_agent_state_description().strip('\n') + '\n</agent_state>\n'
+		state_description += '<app_state>\n' + self._get_app_state_description().strip('\n') + '\n</app_state>\n'
+		state_description += (
+			'<read_state>\n'
+			+ (self.read_state_description.strip('\n') if self.read_state_description else '')
+			+ '\n</read_state>\n'
+		)
 
 		# Multi-modal message (text + screenshot) for vision models
 		if use_vision and getattr(self.app_state, 'screenshot', None):

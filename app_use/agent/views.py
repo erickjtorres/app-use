@@ -16,10 +16,11 @@ from pydantic import (
 	Field,
 	ValidationError,
 	create_model,
+	model_validator,
 )
 
 from app_use.agent.message_manager.views import MessageManagerState
-from app_use.controller.views import ActionModel, ActionResult
+from app_use.controller.registry.views import ActionModel
 from app_use.nodes.app_node import AppState
 
 ToolCallingMethod = Literal['function_calling', 'json_mode', 'raw', 'auto', 'tools']
@@ -66,6 +67,7 @@ class AgentState(BaseModel):
 	n_steps: int = Field(1, ge=1)
 	consecutive_failures: int = Field(0, ge=0)
 	last_result: Optional[List[ActionResult]] = None
+	last_model_output: Optional[AgentOutput] = None
 	history: 'AgentHistoryList' = Field(default_factory=lambda: AgentHistoryList(history=[]))
 	paused: bool = False
 	stopped: bool = False
@@ -99,6 +101,7 @@ class StepMetadata(BaseModel):
 class AgentBrain(BaseModel):
 	"""Current state of the agent"""
 
+	thinking: str
 	evaluation_previous_goal: str
 	memory: str
 	next_goal: str
@@ -109,12 +112,25 @@ class AgentOutput(BaseModel):
 
 	model_config = ConfigDict(arbitrary_types_allowed=True)
 
-	current_state: AgentBrain
+	thinking: str
+	evaluation_previous_goal: str
+	memory: str
+	next_goal: str
 	action: List[ActionModel] = Field(
 		...,
 		description='List of actions to execute',
 		json_schema_extra={'min_items': 1},  # Ensure at least one action is provided
 	)
+
+	@property
+	def current_state(self) -> AgentBrain:
+		"""For backward compatibility - returns an AgentBrain with the flattened properties"""
+		return AgentBrain(
+			thinking=self.thinking,
+			evaluation_previous_goal=self.evaluation_previous_goal,
+			memory=self.memory,
+			next_goal=self.next_goal,
+		)
 
 	@staticmethod
 	def type_with_custom_actions(
@@ -195,7 +211,10 @@ class AgentHistory(BaseModel):
 		if self.model_output:
 			# Use the built-in model_dump for the component parts
 			model_output_dump = {
-				'current_state': self.model_output.current_state.model_dump(),
+				'thinking': self.model_output.thinking,
+				'evaluation_previous_goal': self.model_output.evaluation_previous_goal,
+				'memory': self.model_output.memory,
+				'next_goal': self.model_output.next_goal,
 				'action': [action.model_dump(exclude_none=True) for action in self.model_output.action],
 			}
 
@@ -401,3 +420,35 @@ class AgentError:
 		if include_trace:
 			return f'{str(error)}\nStacktrace:\n{traceback.format_exc()}'
 		return f'{str(error)}'
+
+class ActionResult(BaseModel):
+	"""Result of an action execution"""
+
+	# For done action
+	is_done: bool | None = False
+	success: bool | None = None
+
+	# Error handling - always include in long term memory
+	error: str | None = None
+
+	# Files
+	attachments: list[str] | None = None  # Files to display in the done message
+
+	# Always include in long term memory
+	long_term_memory: str | None = None  # Memory of this action
+
+	# if include_extracted_content_only_once is True we add the extracted_content to the agent context only once for the next step
+	# if include_extracted_content_only_once is False we add the extracted_content to the agent long term memory if no long_term_memory is provided
+	extracted_content: str | None = None
+	include_extracted_content_only_once: bool = False  # Whether the extracted content should be used to update the read_state
+
+	@model_validator(mode='after')
+	def validate_success_requires_done(self):
+		"""Ensure success=True can only be set when is_done=True"""
+		if self.success is True and self.is_done is not True:
+			raise ValueError(
+				'success=True can only be set when is_done=True. '
+				'For regular actions that succeed, leave success as None. '
+				'Use success=False only for actions that fail.'
+			)
+		return self

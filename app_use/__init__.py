@@ -8,11 +8,11 @@ Support for iOS and Android apps with natural language instructions.
 __version__ = '0.0.3'
 
 # Import main components
+from .agent.prompts import SystemPrompt
 from .agent.service import Agent
+from .agent.views import ActionModel, ActionResult
 from .app.app import App
 from .controller.service import Controller
-from .controller.views import ActionResult, ActionModel
-from .agent.prompts import SystemPrompt
 
 # Export main components
 __all__ = ['App', 'Agent', 'Controller', 'ActionResult', 'ActionModel', 'SystemPrompt']

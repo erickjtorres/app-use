@@ -14,12 +14,11 @@ from pydantic import BaseModel
 
 from app_use.agent.message_manager.views import MessageManagerState, MessageMetadata
 from app_use.agent.prompts import AgentMessagePrompt  # moved from this module
-from app_use.controller.views import ActionResult
 from app_use.nodes.app_node import AppState
 from app_use.utils import time_execution_sync
 
 if TYPE_CHECKING:
-	from app_use.agent.views import AgentOutput, AgentStepInfo
+	from app_use.agent.views import ActionResult, AgentOutput, AgentStepInfo
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,8 @@ class MessageManagerSettings(BaseModel):
 	image_tokens: int = 800
 	include_attributes: list[str] = []
 	message_context: str | None = None
-	sensitive_data: dict[str, str] | None = None
+	# Support both old format {key: value} and new format {domain: {key: value}}
+	sensitive_data: dict[str, str | dict[str, str]] | None = None
 	available_file_paths: list[str] | None = None
 
 
@@ -52,6 +52,9 @@ class MessageManager:
 		self.settings = settings
 		self.state = state
 		self.system_prompt = system_message
+		self.agent_history_description = 'Agent initialized.\n'
+		self.read_state_description = ''
+		self.sensitive_data_description = ''
 
 		if len(self.state.history.messages) == 0:
 			self._init_messages()
@@ -70,12 +73,14 @@ class MessageManager:
 		self._add_message_with_tokens(task_message, message_type='init')
 
 		if self.settings.sensitive_data:
-			info = f'Here are placeholders for sensitive data: {list(self.settings.sensitive_data.keys())}'
-			info += '\nTo use them, write <secret>the placeholder name</secret>'
+			info = f'<sensitive_data>Here are placeholders for sensitive data: {list(self.settings.sensitive_data.keys())}'
+			info += '\nTo use them, write <secret>the placeholder name</secret> </sensitive_data>'
 			info_message = HumanMessage(content=info)
 			self._add_message_with_tokens(info_message, message_type='init')
 
-		placeholder_message = HumanMessage(content='Example output:')
+		placeholder_message = HumanMessage(
+			content='<example_1>\nHere is an example output of thinking and action execution. You can use it as a reference but do not copy it exactly.'
+		)
 		self._add_message_with_tokens(placeholder_message, message_type='init')
 
 		example_tool_call = AIMessage(
@@ -84,21 +89,20 @@ class MessageManager:
 				{
 					'name': 'AgentOutput',
 					'args': {
-						'current_state': {
-							'evaluation_previous_goal': """
-                            Success - I successfully tapped on the 'Continue' button, which brought me to 
-                            the main screen of the app. This is a successful step toward completing my task.
-                            """.strip(),
-							'memory': """
-                            I navigated through the app and found the login screen. I used the 'tap_element_by_index' 
-                            tool to tap on element at index [15] labeled 'Continue' which took me to the main screen.
-                            Currently at step 3/15.
-                            """.strip(),
-							'next_goal': """
-                            Looking at the element structure of the current screen, I can see a SearchBar element at 
-                            index [8]. I'll use the 'enter_text' tool to search for the item I need to find.
-                            """.strip(),
-						},
+						'thinking': """I need to analyze the current state of the mobile app. I can see several interactive elements, including a 'Continue' button at index [15]. The user wants me to navigate through the app and complete some task. I should tap on the Continue button to proceed to the main screen.""",
+						'evaluation_previous_goal': """
+                        Success - I successfully tapped on the 'Continue' button, which brought me to 
+                        the main screen of the app. This is a successful step toward completing my task.
+                        """.strip(),
+						'memory': """
+                        I navigated through the app and found the login screen. I used the 'tap_element_by_index' 
+                        action to tap on element at index [15] labeled 'Continue' which took me to the main screen.
+                        Currently at step 3/15.
+                        """.strip(),
+						'next_goal': """
+                        Looking at the element structure of the current screen, I can see a SearchBar element at 
+                        index [8]. I'll use the 'enter_text' action to search for the item I need to find.
+                        """.strip(),
 						'action': [{'tap_element_by_index': {'index': 8}}],
 					},
 					'id': str(self.state.tool_id),
@@ -107,7 +111,7 @@ class MessageManager:
 			],
 		)
 		self._add_message_with_tokens(example_tool_call, message_type='init')
-		self.add_tool_message(content='Mobile app initialized', message_type='init')
+		self.add_tool_message(content='Tapped element with index 8.\n</example_1>', message_type='init')
 
 		placeholder_message = HumanMessage(content='[Your task history memory starts here]')
 		self._add_message_with_tokens(placeholder_message)
@@ -118,41 +122,99 @@ class MessageManager:
 
 	def add_new_task(self, new_task: str) -> None:
 		"""Update the task and add a message about it"""
-		content = f'Your new ultimate task is: """{new_task}""". Take the previous context into account and finish your new ultimate task. '
-		msg = HumanMessage(content=content)
-		self._add_message_with_tokens(msg)
 		self.task = new_task
+		self.agent_history_description += f'\nUser updated USER REQUEST to: {new_task}\n'
+
+	def _update_agent_history_description(
+		self,
+		model_output: 'AgentOutput' | None = None,
+		result: list['ActionResult'] | None = None,
+		step_info: 'AgentStepInfo' | None = None,
+	) -> None:
+		"""Update the agent history description"""
+
+		if result is None:
+			result = []
+		step_number = step_info.step_number if step_info else 'unknown'
+
+		self.read_state_initialization = 'This is displayed only **one time**, save this information if you need it later.\n'
+		self.read_state_description = self.read_state_initialization
+
+		action_results = ''
+		result_len = len(result)
+		for idx, action_result in enumerate(result):
+			if action_result.include_extracted_content_only_once and action_result.extracted_content:
+				self.read_state_description += action_result.extracted_content + '\n'
+				logger.debug(f'Added extracted_content to read_state_description: {action_result.extracted_content}')
+
+			if action_result.long_term_memory:
+				action_results += f'Action {idx + 1}/{result_len} response: {action_result.long_term_memory}\n'
+				logger.debug(f'Added long_term_memory to action_results: {action_result.long_term_memory}')
+			elif action_result.extracted_content and not action_result.include_extracted_content_only_once:
+				action_results += f'Action {idx + 1}/{result_len} response: {action_result.extracted_content}\n'
+				logger.debug(f'Added extracted_content to action_results: {action_result.extracted_content}')
+
+			if action_result.error:
+				action_results += f'Action {idx + 1}/{result_len} response: {action_result.error[:200]}\n'
+				logger.debug(f'Added error to action_results: {action_result.error[:200]}')
+
+		# Handle case where model_output is None (e.g., parsing failed)
+		if model_output is None:
+			if isinstance(step_number, int) and step_number > 0:
+				self.agent_history_description += f"""## Step {step_number}
+No model output (parsing failed)
+{action_results}
+"""
+		else:
+			self.agent_history_description += f"""## Step {step_number}
+Step evaluation: {model_output.current_state.evaluation_previous_goal}
+Step memory: {model_output.current_state.memory}
+Step goal: {model_output.current_state.next_goal}
+{action_results}
+"""
+
+		if self.read_state_description == self.read_state_initialization:
+			self.read_state_description = ''
+		else:
+			self.read_state_description += '\nMAKE SURE TO SAVE THIS INFORMATION INTO A FILE OR TO MEMORY IF YOU NEED IT LATER.'
 
 	@time_execution_sync('--add_state_message')
 	def add_state_message(
 		self,
 		app_state: AppState,
-		result: list[ActionResult] | None = None,
-		step_info: AgentStepInfo | None = None,
+		model_output: 'AgentOutput' | None = None,
+		result: list['ActionResult'] | None = None,
+		step_info: 'AgentStepInfo' | None = None,
 		use_vision=True,
 	) -> None:
 		"""Add app state as human message"""
 
+		self._update_agent_history_description(model_output, result, step_info)
+		if self.settings.sensitive_data:
+			self.sensitive_data_description = self._get_sensitive_data_description()
+
 		# If results should be kept in memory, add them directly to history
 		if result:
 			for r in result:
-				if r.include_in_memory:
-					if r.extracted_content:
-						msg = HumanMessage(content='Action result: ' + str(r.extracted_content))
-						self._add_message_with_tokens(msg)
-					if r.error:
-						if r.error.endswith('\\n'):
-							r.error = r.error[:-1]
+				if r.extracted_content:
+					msg = HumanMessage(content='Action result: ' + str(r.extracted_content))
+					self._add_message_with_tokens(msg)
+				if r.error:
+					if r.error.endswith('\n'):
+						r.error = r.error[:-1]
 						last_line = r.error.split('\\n')[-1]
 						msg = HumanMessage(content='Action error: ' + last_line)
 						self._add_message_with_tokens(msg)
-					result = None
+				result = None
 
 		state_message = AgentMessagePrompt(
 			app_state=app_state,
-			result=result,
+			agent_history_description=self.agent_history_description,
+			read_state_description=self.read_state_description,
+			task=self.task,
 			include_attributes=self.settings.include_attributes,
 			step_info=step_info,
+			sensitive_data=self.sensitive_data_description,
 		).get_user_message(use_vision)
 
 		self._add_message_with_tokens(state_message)
@@ -221,13 +283,27 @@ class MessageManager:
 			if not self.settings.sensitive_data:
 				return value
 
-			valid_sensitive_data = {k: v for k, v in self.settings.sensitive_data.items() if v}
+			# Collect all sensitive values, immediately converting old format to new format
+			sensitive_values: dict[str, str] = {}
 
-			if not valid_sensitive_data:
+			# Process all sensitive data entries
+			for key_or_domain, content in self.settings.sensitive_data.items():
+				if isinstance(content, dict):
+					# Already in new format: {domain: {key: value}}
+					for key, val in content.items():
+						if val:  # Skip empty values
+							sensitive_values[key] = val
+				elif content:  # Old format: {key: value} - convert to new format internally
+					# We treat this as if it was {'http*://*': {key_or_domain: content}}
+					sensitive_values[key_or_domain] = content
+
+			# If there are no valid sensitive data entries, just return the original value
+			if not sensitive_values:
 				logger.warning('No valid entries found in sensitive_data dictionary')
 				return value
 
-			for key, val in valid_sensitive_data.items():
+			# Replace all valid sensitive data values with their placeholder tags
+			for key, val in sensitive_values.items():
 				value = value.replace(val, f'<secret>{key}</secret>')
 
 			return value
@@ -324,3 +400,27 @@ class MessageManager:
 		msg = ToolMessage(content=content, tool_call_id=str(self.state.tool_id))
 		self.state.tool_id += 1
 		self._add_message_with_tokens(msg, message_type=message_type)
+
+	def _get_sensitive_data_description(self) -> str:
+		"""Get sensitive data description for placeholders"""
+		sensitive_data = self.settings.sensitive_data
+		if not sensitive_data:
+			return ''
+
+		# Collect placeholders for sensitive data
+		placeholders = set()
+
+		for key, value in sensitive_data.items():
+			if isinstance(value, dict):
+				# New format: {domain: {key: value}}
+				placeholders.update(value.keys())
+			else:
+				# Old format: {key: value}
+				placeholders.add(key)
+		
+		if placeholders:
+			info = f'Here are placeholders for sensitive data: {list(placeholders)}'
+			info += '\nTo use them, write <secret>the placeholder name</secret>'
+			return info
+
+		return ''

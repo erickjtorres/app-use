@@ -29,7 +29,6 @@ from app_use.agent.prompts import PlannerPrompt, SystemPrompt
 from app_use.agent.views import (
 	REQUIRED_LLM_API_ENV_VARS,
 	ActionResult,
-	AgentBrain,
 	AgentError,
 	AgentHistory,
 	AgentHistoryList,
@@ -53,16 +52,17 @@ SKIP_LLM_API_KEY_VERIFICATION = os.environ.get('SKIP_LLM_API_KEY_VERIFICATION', 
 def log_response(response: AgentOutput) -> None:
 	"""Utility function to log the model's response."""
 
-	if 'Success' in response.current_state.evaluation_previous_goal:
+	if 'Success' in response.evaluation_previous_goal:
 		emoji = '👍'
-	elif 'Failed' in response.current_state.evaluation_previous_goal:
+	elif 'Failed' in response.evaluation_previous_goal:
 		emoji = '⚠'
 	else:
 		emoji = '🤷'
 
-	logger.info(f'{emoji} Eval: {response.current_state.evaluation_previous_goal}')
-	logger.info(f'🧠 Memory: {response.current_state.memory}')
-	logger.info(f'🎯 Next goal: {response.current_state.next_goal}')
+	logger.info(f'💡 Thinking:\n{response.thinking}')
+	logger.info(f'{emoji} Eval: {response.evaluation_previous_goal}')
+	logger.info(f'🧠 Memory: {response.memory}')
+	logger.info(f'🎯 Next goal: {response.next_goal}')
 	for i, action in enumerate(response.action):
 		logger.info(f'🛠️  Action {i + 1}/{len(response.action)}: {action.model_dump_json(exclude_unset=True)}')
 
@@ -106,6 +106,7 @@ class Agent(Generic[Context]):
 		enable_memory: bool = True,
 		memory_config: MemoryConfig | None = None,
 		generate_gif: bool | str = False,
+		use_mem0_client: bool = False,
 	):
 		if page_extraction_llm is None:
 			page_extraction_llm = llm
@@ -120,6 +121,7 @@ class Agent(Generic[Context]):
 		self.app = app
 		self.controller = controller or Controller()
 		self.sensitive_data = sensitive_data
+		self.use_mem0_client = use_mem0_client
 
 		self.settings = AgentSettings(
 			use_vision=use_vision,
@@ -186,6 +188,7 @@ class Agent(Generic[Context]):
 					message_manager=self._message_manager,
 					llm=self.llm,
 					config=self.memory_config,
+					use_mem0_client=self.use_mem0_client,
 				)
 			except ImportError:
 				logger.warning(
@@ -211,19 +214,6 @@ class Agent(Generic[Context]):
 			f' extraction_model={getattr(self.settings.page_extraction_llm, "model_name", None)}'
 			f'{f" planner_model={self.planner_model_name}" if self.planner_model_name else ""}'
 			f'{" +reasoning" if self.settings.is_planner_reasoning else ""}'
-		)
-
-		self._message_manager = MessageManager(
-			task=task,
-			system_message=system_message,
-			settings=MessageManagerSettings(
-				max_input_tokens=self.settings.max_input_tokens,
-				include_attributes=self.settings.include_attributes if hasattr(self.settings, 'include_attributes') else [],
-				message_context=self.settings.message_context,
-				sensitive_data=sensitive_data,
-				available_file_paths=None,
-			),
-			state=self.state.message_manager_state,
 		)
 
 		self.initial_actions = self._convert_initial_actions(initial_actions) if initial_actions else None
@@ -329,17 +319,21 @@ class Agent(Generic[Context]):
 				self.memory.create_procedural_memory(self.state.n_steps)
 
 			await self._raise_if_stopped_or_paused()
-
-			# Run planner if conditions are met
-			await self._run_planner(step_info)
-
-			# Use MessageManager to add state message with app state and previous results
+   
+			# Use MessageManager to add state message with app state and previous results			# Use MessageManager to add state message with app state and previous results
 			self._message_manager.add_state_message(
 				app_state=original_app_state,
+				model_output=self.state.last_model_output,
 				result=self.state.last_result,
 				step_info=step_info,
 				use_vision=self.settings.use_vision,
 			)
+
+			# Run planner if conditions are met
+			if self.settings.planner_llm and self.state.n_steps % self.settings.planner_interval == 0:
+				plan = await self._run_planner()
+				# add plan before last state message
+				self._message_manager.add_plan(plan, position=-1)
 
 			# If this is the last step, add a message to use 'done' action
 			if step_info and step_info.is_last_step():
@@ -424,6 +418,7 @@ class Agent(Generic[Context]):
 			# Execute the model's action(s)
 			result = await self.multi_act(model_output.action)
 			self.state.last_result = result
+			self.state.last_model_output = model_output
 
 			if len(result) > 0 and result[-1].is_done:
 				logger.info(f'📄 Result: {result[-1].extracted_content}')
@@ -435,13 +430,13 @@ class Agent(Generic[Context]):
 			self.state.last_result = [
 				ActionResult(
 					error='The agent was paused mid-step - the last action might need to be repeated',
-					include_in_memory=False,
+					
 				)
 			]
 			return
 		except asyncio.CancelledError:
 			# Directly handle the case where the step is cancelled at a higher level
-			self.state.last_result = [ActionResult(error='The agent was paused with Ctrl+C', include_in_memory=False)]
+			self.state.last_result = [ActionResult(error='The agent was paused with Ctrl+C')]
 			raise InterruptedError('Step cancelled by user')
 		except Exception as e:
 			result = await self._handle_step_error(e)
@@ -494,7 +489,7 @@ class Agent(Generic[Context]):
 			else:
 				logger.error(f'{prefix}{error_msg}')
 
-		return [ActionResult(error=error_msg, include_in_memory=True)]
+		return [ActionResult(error=error_msg)]
 
 	def _make_history_item(
 		self,
@@ -564,27 +559,15 @@ class Agent(Generic[Context]):
 			logger.debug(f'Using {self.tool_calling_method} for {self.chat_model_library}')
 			structured_llm = self.llm.with_structured_output(self.AgentOutput, include_raw=True, method=self.tool_calling_method)
 			response: dict[str, Any] = await structured_llm.ainvoke(input_messages)  # type: ignore
+		
 		# Handle tool call responses
 		if response.get('parsing_error') and 'raw' in response:
 			raw_msg = response['raw']
 			if hasattr(raw_msg, 'tool_calls') and raw_msg.tool_calls:
 				# Convert tool calls to AgentOutput format
 				tool_call = raw_msg.tool_calls[0]  # Take first tool call
-
-				# Create current state
-				tool_call_name = tool_call['name']
 				tool_call_args = tool_call['args']
-
-				current_state = AgentBrain(
-					evaluation_previous_goal='Executing action',
-					memory='Using tool call',
-					next_goal=f'Execute {tool_call_name}',
-				)
-
-				# Create action from tool call
-				action = {tool_call_name: tool_call_args}
-
-				parsed = self.AgentOutput(current_state=current_state, action=[self.ActionModel(**action)])
+				parsed = self.AgentOutput(**tool_call_args)
 			else:
 				try:
 					raw_output = response['raw'].content
@@ -642,7 +625,6 @@ class Agent(Generic[Context]):
 					results.append(
 						ActionResult(
 							error='The action was cancelled due to Ctrl+C',
-							include_in_memory=True,
 						)
 					)
 				raise InterruptedError('Action cancelled by user')

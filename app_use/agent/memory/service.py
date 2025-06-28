@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from app_use.agent.message_manager.views import ManagedMessage
+
 """Procedural memory service for *app-use* agents."""
 
 import logging
 import os
-from typing import Any
+import tempfile
+import uuid
+import warnings
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -31,9 +36,12 @@ class Memory:
 		message_manager: MessageManager,
 		llm: BaseChatModel,
 		config: MemoryConfig | None = None,
+        use_mem0_client: bool = False,
 	) -> None:
 		self.message_manager = message_manager
 		self.llm = llm
+		self.logger = logger
+		self.use_mem0_client = use_mem0_client
 
 		# ------------------------------------------------------------------
 		# Derive configuration defaults if none provided -------------------
@@ -72,7 +80,8 @@ class Memory:
 		try:
 			if os.getenv('ANONYMIZED_TELEMETRY', 'true').lower()[0] in 'fn0':
 				os.environ['MEM0_TELEMETRY'] = 'False'
-			from mem0 import Memory as Mem0Memory  # pylint: disable=import-error
+			from mem0 import Memory as Mem0Memory
+			from mem0 import MemoryClient  # pylint: disable=import-error
 		except ImportError as exc:  # pragma: no cover
 			raise ImportError('mem0 is required when enable_memory=True. Please install it with `pip install mem0`.') from exc
 
@@ -84,42 +93,83 @@ class Memory:
 					'sentence_transformers is required when enable_memory=True and embedder_provider="huggingface". '
 					'Please install it with `pip install sentence-transformers`.'
 				) from exc
+    
 
-		# Instantiate Mem0 backend
+		if self.use_mem0_client:
+			self.mem0 = MemoryClient()
+		else:
+			# Initialize Mem0 with the configuration
+			with warnings.catch_warnings():
+				warnings.filterwarnings('ignore', category=DeprecationWarning)
+				try:
+					self.mem0 = Mem0Memory.from_config(config_dict=self.config.full_config_dict)
+				except Exception as e:
+					if 'history_old' in str(e) and 'sqlite3.OperationalError' in str(type(e)):
+					# Handle the migration error by using a unique history database path
+						self.logger.warning(
+						f'⚠️ Mem0 SQLite migration error detected in {self.config.full_config_dict}. Using a temporary database to avoid conflicts.\n{type(e).__name__}: {e}'
+					)
+					# Create a unique temporary database path
+						temp_dir = tempfile.gettempdir()
+						unique_id = str(uuid.uuid4())[:8]
+						history_db_path = os.path.join(temp_dir, f'app_use_mem0_history_{unique_id}.db')
 
-		self.mem0 = Mem0Memory.from_config(config_dict=self.config.full_config_dict)
+					# Add the history_db_path to the config
+						config_with_history_path = self.config.full_config_dict.copy()
+						config_with_history_path['history_db_path'] = history_db_path
+
+					# Try again with the new config
+						self.mem0 = Mem0Memory.from_config(config_dict=config_with_history_path)
+					else:
+					# Re-raise if it's a different error
+						raise
 
 	# ------------------------------------------------------------------
 	# Public API --------------------------------------------------------
 	# ------------------------------------------------------------------
 	@time_execution_sync('--create_procedural_memory')
 	def create_procedural_memory(self, current_step: int) -> None:
-		"""Create and insert procedural memory into chat history if needed."""
-		logger.debug('Creating procedural memory at step %s', current_step)
+		"""Create and insert procedural memory into chat history if needed.
+		
+		Args:
+		    current_step: The current step number of the agent
+		"""
+		self.logger.debug(f'📱 Creating procedural memory at step {current_step}')
 
 		all_messages = self.message_manager.state.history.messages
-		new_messages: list[Any] = []  # maintain same ManagedMessage type
-		messages_to_process: list[Any] = []
+		new_messages: list[ManagedMessage] = []  # maintain same ManagedMessage type
+		messages_to_process: list[ManagedMessage] = []
 
 		for msg in all_messages:
-			if hasattr(msg, 'metadata') and msg.metadata.message_type in {
+			if isinstance(msg, ManagedMessage) and msg.metadata.message_type in {
 				'init',
 				'memory',
 			}:
+				# Keep system and memory messages as they are
 				new_messages.append(msg)
 			else:
-				if getattr(msg.message, 'content', ''):
+				if len(msg.message.content) > 0:
 					messages_to_process.append(msg)
 
 		# At least 2 messages required to build meaningful summary
 		if len(messages_to_process) <= 1:
-			logger.debug('Not enough non-memory messages to summarise')
+			self.logger.debug('📱 Not enough non-memory messages to summarise')
 			return
 
-		memory_content = self._create([m.message for m in messages_to_process], current_step)
+		# Create a procedural memory with timeout
+		try:
+			with ThreadPoolExecutor(max_workers=1) as executor:
+				future = executor.submit(self._create, [m.message for m in messages_to_process], current_step)
+				memory_content = future.result(timeout=30)
+		except TimeoutError:
+			self.logger.warning('📱 Procedural memory creation timed out after 30 seconds')
+			return
+		except Exception as e:
+			self.logger.error(f'📱 Error during procedural memory creation: {e}')
+			return
 
 		if not memory_content:
-			logger.warning('Failed to create procedural memory')
+			self.logger.warning('📱 Failed to create procedural memory: ' + str(messages_to_process))
 			return
 
 		# Replace processed window with single memory blob
@@ -134,21 +184,18 @@ class Memory:
 
 		# push memory message
 		new_messages.append(
-			type(messages_to_process[0])(  # ManagedMessage class
+			ManagedMessage(  # ManagedMessage class
 				message=memory_msg,
 				metadata=MessageMetadata(tokens=memory_tokens, message_type='memory'),
 			)
 		)
 
 		# Update manager state
-		hist = self.message_manager.state.history
-		hist.messages = new_messages
-		hist.current_tokens = hist.current_tokens - removed_tokens + memory_tokens
-		logger.info(
-			'Messages consolidated: %s messages converted to procedural memory',
-			len(messages_to_process),
-		)
-
+		self.message_manager.state.history.messages = new_messages
+		self.message_manager.state.history.current_tokens -= removed_tokens
+		self.message_manager.state.history.current_tokens += memory_tokens
+		self.logger.info(f'📜 History consolidated: {len(messages_to_process)} steps converted to long-term memory')
+  
 	# ------------------------------------------------------------------
 	# Internal helpers --------------------------------------------------
 	# ------------------------------------------------------------------
@@ -162,9 +209,9 @@ class Memory:
 				memory_type='procedural_memory',
 				metadata={'step': current_step},
 			)
-			if results.get('results'):
-				return results['results'][0].get('memory')
+			if len(results.get('results', [])):
+				return results.get('results', [])[0].get('memory')
 			return None
 		except Exception as exc:  # pragma: no cover
-			logger.error('Error creating procedural memory: %s', exc)
+			self.logger.error(f'📱 Error creating procedural memory: {exc}')
 			return None

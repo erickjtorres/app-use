@@ -1,77 +1,5 @@
-from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict, model_validator
-
-
-# Action Input Models
-class ActionModel(BaseModel):
-	"""Base model for dynamically created action models"""
-
-	model_config = ConfigDict(arbitrary_types_allowed=True)
-
-	def get_index(self) -> int | None:
-		"""Get the index of the action if it exists"""
-		params = self.model_dump(exclude_unset=True).values()
-		if not params:
-			return None
-		for param in params:
-			if param is not None and 'index' in param:
-				return param['index']
-		return None
-
-	def set_index(self, index: int):
-		"""Overwrite the index of the action"""
-		action_data = self.model_dump(exclude_unset=True)
-		action_name = next(iter(action_data.keys()))
-		action_params = getattr(self, action_name)
-
-		if hasattr(action_params, 'index'):
-			action_params.index = index
-
-
-class RegisteredAction(BaseModel):
-	"""Model for a registered action"""
-
-	name: str
-	description: str
-	function: Callable
-	param_model: type[BaseModel]
-
-	model_config = ConfigDict(arbitrary_types_allowed=True)
-
-	def prompt_description(self) -> str:
-		"""Get a description of the action for the prompt"""
-		skip_keys = ['title']
-		s = f'{self.description}: \n'
-		s += '{' + str(self.name) + ': '
-		s += str(
-			{
-				k: {sub_k: sub_v for sub_k, sub_v in v.items() if sub_k not in skip_keys}
-				for k, v in self.param_model.model_json_schema()['properties'].items()
-			}
-		)
-		s += '}'
-		return s
-
-
-class ActionRegistry(BaseModel):
-	"""Model representing the action registry"""
-
-	actions: dict[str, RegisteredAction] = {}
-
-	def get_prompt_description(self) -> str:
-		"""Get a description of all actions for the prompt"""
-		return '\n'.join(action.prompt_description() for action in self.actions.values())
-
-
-class ActionResult(BaseModel):
-	"""Result of an action execution"""
-
-	is_done: bool = False
-	success: bool = True
-	error: str | None = None
-	extracted_content: str | None = None
-	include_in_memory: bool = False
 
 
 class ClickElementAction(BaseModel):
@@ -153,15 +81,15 @@ class DragAndDropCoordinatesAction(BaseModel):
 
 
 class GetDropdownOptionsAction(BaseModel):
-	"""Action model for retrieving all options from a dropdown element by its unique ID"""
+	"""Action model for retrieving all options from a dropdown element by its index"""
 
-	unique_id: int  # Keep name for compatibility but represents highlight_index
+	index: int  # Keep name for compatibility but represents highlight_index
 
 
 class SelectDropdownOptionAction(BaseModel):
 	"""Action model for selecting an option in a dropdown by its text"""
 
-	unique_id: int  # Keep name for compatibility but represents highlight_index
+	index: int  # Keep name for compatibility but represents highlight_index
 	text: str
 
 
