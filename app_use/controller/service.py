@@ -70,7 +70,7 @@ class Controller(Generic[Context]):
 		"""
 		if output_model is not None:
 			# Create the ExtendedOutputModel dynamically using create_model
-						# Create a new model that extends the output model with success parameter
+			# Create a new model that extends the output model with success parameter
 			class ExtendedOutputModel(BaseModel):  # type: ignore
 				success: bool = True
 				data: output_model  # type: ignore
@@ -166,7 +166,9 @@ class Controller(Generic[Context]):
 
 				if success:
 					msg = f"⌨️ Entered text '{params.text}' into element with highlight index {params.index}"
-					return ActionResult(extracted_content=msg, long_term_memory=f"Entered text '{params.text}' into element {params.index}")
+					return ActionResult(
+						extracted_content=msg, long_term_memory=f"Entered text '{params.text}' into element {params.index}"
+					)
 				else:
 					error_msg = f'Failed to enter text into element with highlight index {params.index}'
 					return ActionResult(error=error_msg, long_term_memory=error_msg)
@@ -275,7 +277,9 @@ class Controller(Generic[Context]):
 					node_info.append(info)
 
 				msg = f'Retrieved app state with {len(app_state.selector_map)} nodes:\n{str(node_info)}'
-				return ActionResult(extracted_content=msg, long_term_memory=f'Retrieved app state with {len(app_state.selector_map)} nodes')
+				return ActionResult(
+					extracted_content=msg, long_term_memory=f'Retrieved app state with {len(app_state.selector_map)} nodes'
+				)
 			except Exception as e:
 				logger.error(f'Error in get_app_state: {str(e)}')
 				error_msg = f'Exception in get_app_state: {str(e)}'
@@ -316,7 +320,10 @@ class Controller(Generic[Context]):
 
 				if success:
 					msg = f'👆 Swiped from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})'
-					return ActionResult(extracted_content=msg, long_term_memory=f'Swiped from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})')
+					return ActionResult(
+						extracted_content=msg,
+						long_term_memory=f'Swiped from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})',
+					)
 				else:
 					error_msg = f'Failed to swipe from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})'
 					return ActionResult(error=error_msg, long_term_memory=error_msg)
@@ -339,7 +346,10 @@ class Controller(Generic[Context]):
 				if success:
 					gesture_type = 'pinch in' if params.percent < 50 else 'pinch out'
 					msg = f'🤏 Performed {gesture_type} gesture at ({params.center_x}, {params.center_y}) with {params.percent}% intensity'
-					return ActionResult(extracted_content=msg, long_term_memory=f'Performed {gesture_type} gesture at ({params.center_x}, {params.center_y})')
+					return ActionResult(
+						extracted_content=msg,
+						long_term_memory=f'Performed {gesture_type} gesture at ({params.center_x}, {params.center_y})',
+					)
 				else:
 					error_msg = f'Failed to perform pinch gesture at ({params.center_x}, {params.center_y})'
 					return ActionResult(error=error_msg, long_term_memory=error_msg)
@@ -361,7 +371,10 @@ class Controller(Generic[Context]):
 
 				if success:
 					msg = f'👆 Performed long press at ({params.x}, {params.y}) for {params.duration}ms'
-					return ActionResult(extracted_content=msg, long_term_memory=f'Performed long press at ({params.x}, {params.y}) for {params.duration}ms')
+					return ActionResult(
+						extracted_content=msg,
+						long_term_memory=f'Performed long press at ({params.x}, {params.y}) for {params.duration}ms',
+					)
 				else:
 					error_msg = f'Failed to perform long press at ({params.x}, {params.y})'
 					return ActionResult(error=error_msg, long_term_memory=error_msg)
@@ -389,7 +402,10 @@ class Controller(Generic[Context]):
 
 				if success:
 					msg = f'🖱️ Dragged from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})'
-					return ActionResult(extracted_content=msg, long_term_memory=f'Dragged from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})')
+					return ActionResult(
+						extracted_content=msg,
+						long_term_memory=f'Dragged from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})',
+					)
 				else:
 					error_msg = f'Failed to drag from ({params.start_x}, {params.start_y}) to ({params.end_x}, {params.end_y})'
 					return ActionResult(error=error_msg, long_term_memory=error_msg)
@@ -486,7 +502,9 @@ class Controller(Generic[Context]):
 					element.send_keys(params.text)
 
 				msg = f"Selected option '{params.text}' in dropdown {params.index}"
-				return ActionResult(extracted_content=msg, long_term_memory=f"Selected option '{params.text}' in dropdown {params.index}")
+				return ActionResult(
+					extracted_content=msg, long_term_memory=f"Selected option '{params.text}' in dropdown {params.index}"
+				)
 			except Exception as e:
 				logger.error(f'Error selecting dropdown option: {str(e)}')
 				error_msg = str(e)

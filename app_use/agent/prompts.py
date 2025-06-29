@@ -210,7 +210,7 @@ class AgentMessagePrompt:
 			step_info_description = f'Step {self.step_info.step_number + 1} of {self.step_info.max_steps} max possible steps\n'
 		else:
 			step_info_description = ''
-		
+
 		time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
 		step_info_description += f'Current date and time: {time_str}'
 
@@ -244,7 +244,7 @@ class AgentMessagePrompt:
 		)
 
 		# Multi-modal message (text + screenshot) for vision models
-		if use_vision and getattr(self.app_state, 'screenshot', None):
+		if use_vision is True and self.app_state.screenshot:
 			return HumanMessage(
 				content=[
 					{'type': 'text', 'text': state_description},

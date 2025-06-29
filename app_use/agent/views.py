@@ -56,7 +56,7 @@ class AgentSettings(BaseModel):
 	extend_planner_system_prompt: Optional[str] = None
 	generate_gif: bool = False
 
-	tool_calling_method: Optional[ToolCallingMethod] = 'auto'
+	tool_calling_method: ToolCallingMethod | None = 'auto'
 	page_extraction_llm: Optional[BaseChatModel] = None
 
 
@@ -420,6 +420,7 @@ class AgentError:
 		if include_trace:
 			return f'{str(error)}\nStacktrace:\n{traceback.format_exc()}'
 		return f'{str(error)}'
+
 
 class ActionResult(BaseModel):
 	"""Result of an action execution"""

@@ -36,7 +36,7 @@ class Memory:
 		message_manager: MessageManager,
 		llm: BaseChatModel,
 		config: MemoryConfig | None = None,
-        use_mem0_client: bool = False,
+		use_mem0_client: bool = False,
 	) -> None:
 		self.message_manager = message_manager
 		self.llm = llm
@@ -93,7 +93,6 @@ class Memory:
 					'sentence_transformers is required when enable_memory=True and embedder_provider="huggingface". '
 					'Please install it with `pip install sentence-transformers`.'
 				) from exc
-    
 
 		if self.use_mem0_client:
 			self.mem0 = MemoryClient()
@@ -105,23 +104,23 @@ class Memory:
 					self.mem0 = Mem0Memory.from_config(config_dict=self.config.full_config_dict)
 				except Exception as e:
 					if 'history_old' in str(e) and 'sqlite3.OperationalError' in str(type(e)):
-					# Handle the migration error by using a unique history database path
+						# Handle the migration error by using a unique history database path
 						self.logger.warning(
-						f'⚠️ Mem0 SQLite migration error detected in {self.config.full_config_dict}. Using a temporary database to avoid conflicts.\n{type(e).__name__}: {e}'
-					)
-					# Create a unique temporary database path
+							f'⚠️ Mem0 SQLite migration error detected in {self.config.full_config_dict}. Using a temporary database to avoid conflicts.\n{type(e).__name__}: {e}'
+						)
+						# Create a unique temporary database path
 						temp_dir = tempfile.gettempdir()
 						unique_id = str(uuid.uuid4())[:8]
 						history_db_path = os.path.join(temp_dir, f'app_use_mem0_history_{unique_id}.db')
 
-					# Add the history_db_path to the config
+						# Add the history_db_path to the config
 						config_with_history_path = self.config.full_config_dict.copy()
 						config_with_history_path['history_db_path'] = history_db_path
 
-					# Try again with the new config
+						# Try again with the new config
 						self.mem0 = Mem0Memory.from_config(config_dict=config_with_history_path)
 					else:
-					# Re-raise if it's a different error
+						# Re-raise if it's a different error
 						raise
 
 	# ------------------------------------------------------------------
@@ -130,7 +129,7 @@ class Memory:
 	@time_execution_sync('--create_procedural_memory')
 	def create_procedural_memory(self, current_step: int) -> None:
 		"""Create and insert procedural memory into chat history if needed.
-		
+
 		Args:
 		    current_step: The current step number of the agent
 		"""
@@ -150,7 +149,6 @@ class Memory:
 			else:
 				if len(msg.message.content) > 0:
 					messages_to_process.append(msg)
-
 		# At least 2 messages required to build meaningful summary
 		if len(messages_to_process) <= 1:
 			self.logger.debug('📱 Not enough non-memory messages to summarise')
@@ -195,7 +193,7 @@ class Memory:
 		self.message_manager.state.history.current_tokens -= removed_tokens
 		self.message_manager.state.history.current_tokens += memory_tokens
 		self.logger.info(f'📜 History consolidated: {len(messages_to_process)} steps converted to long-term memory')
-  
+
 	# ------------------------------------------------------------------
 	# Internal helpers --------------------------------------------------
 	# ------------------------------------------------------------------

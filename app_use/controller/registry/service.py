@@ -86,13 +86,8 @@ class Registry(Generic[Context]):
 						param_type = next((arg for arg in args if arg is not type(None)), param_type)
 
 					# Check if types are compatible
-					types_compatible = (
-						param_type == expected_type
-						or (
-							inspect.isclass(param_type)
-							and inspect.isclass(expected_type)
-							and issubclass(param_type, expected_type)
-						)
+					types_compatible = param_type == expected_type or (
+						inspect.isclass(param_type) and inspect.isclass(expected_type) and issubclass(param_type, expected_type)
 					)
 
 					if not types_compatible:
