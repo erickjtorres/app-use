@@ -51,7 +51,7 @@ class App:
 		self.app_activity = app_activity
 		self.bundle_id = bundle_id
 		self.app = app
-		self.udid = None
+		self.udid = udid
 		self.appium_server_url = appium_server_url
 		self.timeout = timeout
 		self.additional_capabilities = capabilities
